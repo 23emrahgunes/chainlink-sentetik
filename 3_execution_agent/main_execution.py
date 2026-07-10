@@ -20,8 +20,7 @@ import time
 
 import redis.asyncio as redis
 from dotenv import load_dotenv
-from web3 import AsyncWeb3
-from web3.providers.async_rpc import AsyncHTTPProvider
+from web3 import AsyncWeb3, AsyncHTTPProvider
 
 from clob_order import build_order, order_hash, sign_order, submit_order
 from gas_booster import compute_gas, gwei

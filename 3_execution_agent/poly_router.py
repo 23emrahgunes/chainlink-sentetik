@@ -12,8 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from web3 import AsyncWeb3
-from web3.providers.async_rpc import AsyncHTTPProvider
+from web3 import AsyncWeb3, AsyncHTTPProvider
 
 log = logging.getLogger("exec.router")
 
