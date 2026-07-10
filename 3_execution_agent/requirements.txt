@@ -1,0 +1,6 @@
+# GHOST ORACLE v5.0 :: Ajan 3 - Execution Sniper
+# asyncio standart kutuphanededir, eklenmez.
+web3>=6.15.0
+redis>=5.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0        # SADECE LIVE CLOB POST icin

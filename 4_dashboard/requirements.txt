@@ -1,0 +1,6 @@
+# GHOST ORACLE v5.0 :: Ajan 4 - Observer Dashboard
+# asyncio standart kutuphanededir, eklenmez.
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+redis>=5.0.0
+python-dotenv>=1.0.0

@@ -1,0 +1,214 @@
+<!-- GHOST ORACLE v5.0 :: Ajan 4 — Observer Dashboard (Zero-CPU frontend)
+     Tailwind CDN + Alpine.js. JS sadece WS mesajini DOM'a basar; agir hesap yok. -->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GHOST ORACLE v5.0 - Live Telemetry</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  body { background:#0a0e14; font-family:ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace; }
+  .glow { text-shadow:0 0 8px currentColor; }
+  .pulse { animation:pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .card { background:linear-gradient(180deg,#111827,#0d131f); }
+</style>
+
+<body class="text-slate-200 min-h-screen p-4 sm:p-8" x-data="ghost()" x-init="init()">
+  <!-- Baslik -->
+  <header class="mb-8 flex items-center justify-between flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl sm:text-3xl font-bold tracking-widest text-emerald-400 glow">
+        👻 GHOST ORACLE v5.0
+      </h1>
+      <p class="text-xs text-slate-500 tracking-[0.3em] uppercase">Live Telemetry</p>
+    </div>
+    <div class="flex items-center gap-2 text-sm">
+      <span class="h-2.5 w-2.5 rounded-full pulse"
+            :class="wsOpen ? 'bg-emerald-400' : 'bg-rose-500'"></span>
+      <span x-text="wsOpen ? 'STREAM CANLI' : 'BAGLANTI YOK'"
+            :class="wsOpen ? 'text-emerald-400' : 'text-rose-500'"></span>
+    </div>
+  </header>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Kutu 1: Son 5 Sinyal -->
+    <section class="card lg:col-span-2 rounded-xl border border-slate-800 p-5 shadow-xl">
+      <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-4">Son 5 Sinyal</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-slate-500 border-b border-slate-800 text-left">
+              <th class="py-2 font-medium">Zaman</th>
+              <th class="py-2 font-medium">Yön</th>
+              <th class="py-2 font-medium text-right">Fiyat (P_cex)</th>
+              <th class="py-2 font-medium text-right">Durum</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="row in signals" :key="row.id">
+              <tr class="border-b border-slate-900/60">
+                <td class="py-2 text-slate-500" x-text="row.time"></td>
+                <td class="py-2 font-bold"
+                    :class="row.dir === 'LONG' ? 'text-emerald-400' : 'text-rose-400'">
+                  <span x-text="row.dir === 'LONG' ? '▲ LONG' : '▼ SHORT'"></span>
+                </td>
+                <td class="py-2 text-right tabular-nums text-slate-300" x-text="row.price"></td>
+                <td class="py-2 text-right">
+                  <span class="px-2 py-0.5 rounded text-xs font-semibold"
+                        :class="{
+                          'bg-sky-500/15 text-sky-300': row.status === 'SINYAL',
+                          'bg-emerald-500/15 text-emerald-300': row.status === 'ONAYLI',
+                          'bg-rose-500/15 text-rose-300': row.status === 'RED'
+                        }"
+                        x-text="row.status"></span>
+                </td>
+              </tr>
+            </template>
+            <tr x-show="signals.length === 0">
+              <td colspan="4" class="py-8 text-center text-slate-600">
+                Sinyal bekleniyor... <span class="pulse">▮</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Ekstra: CEX mid fiyat sparkline (basit canvas) -->
+      <div class="mt-5 pt-4 border-t border-slate-800">
+        <div class="flex justify-between items-baseline mb-1">
+          <span class="text-xs uppercase tracking-widest text-slate-500">CEX Mid Fiyat</span>
+          <span class="tabular-nums text-emerald-400 text-sm" x-text="lastPrice || '—'"></span>
+        </div>
+        <canvas x-ref="spark" height="60" class="w-full"></canvas>
+      </div>
+    </section>
+
+    <!-- Kutu 2: System Health -->
+    <section class="card rounded-xl border border-slate-800 p-5 shadow-xl">
+      <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-4">System Health</h2>
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <span class="text-slate-400">Redis</span>
+          <span class="font-semibold"
+                :class="redisOk ? 'text-emerald-400' : 'text-rose-500'"
+                x-text="redisOk ? '● BAGLI' : '○ KOPUK'"></span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-slate-400">WebSocket</span>
+          <span class="font-semibold"
+                :class="wsOpen ? 'text-emerald-400' : 'text-rose-500'"
+                x-text="wsOpen ? '● ACIK' : '○ KAPALI'"></span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-slate-400">Son Sinyal Gecikmesi</span>
+          <span class="font-semibold tabular-nums"
+                :class="latency < 500 ? 'text-emerald-400' : latency < 1500 ? 'text-amber-400' : 'text-rose-400'">
+            <span x-text="latency === null ? '—' : latency + ' ms'"></span>
+          </span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-slate-400">Toplam Sinyal</span>
+          <span class="font-semibold tabular-nums text-slate-200" x-text="totalSignals"></span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-slate-400">Mesaj/sn (yaklaşık)</span>
+          <span class="font-semibold tabular-nums text-slate-200" x-text="msgRate"></span>
+        </div>
+      </div>
+      <p class="mt-6 text-[11px] leading-relaxed text-slate-600">
+        Pass-through köprü. Sunucu veri üzerinde işlem yapmaz; tüm render istemci GPU'sunda
+        (Tailwind/Alpine) yapılır. Zero-CPU gözlem katmanı.
+      </p>
+    </section>
+  </div>
+
+  <script>
+    function ghost() {
+      return {
+        signals: [],          // son 5 satir (sinyal + execution birlesik)
+        redisOk: false,
+        wsOpen: false,
+        latency: null,
+        totalSignals: 0,
+        lastPrice: null,
+        msgRate: 0,
+        _prices: [],          // sparkline icin son ~60 mid nokta
+        _rowId: 0,
+        _msgCount: 0,
+
+        init() {
+          this.connect();
+          // Mesaj hizi: saniyede bir sayaci oku (agir hesap degil).
+          setInterval(() => { this.msgRate = this._msgCount; this._msgCount = 0; }, 1000);
+        },
+
+        connect() {
+          const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+          const ws = new WebSocket(`${proto}://${location.host}/ws`);
+          ws.onopen = () => { this.wsOpen = true; };
+          ws.onclose = () => {
+            this.wsOpen = false; this.redisOk = false;
+            setTimeout(() => this.connect(), 1500);   // otomatik yeniden baglan
+          };
+          ws.onmessage = (e) => this.onMessage(JSON.parse(e.data));
+        },
+
+        onMessage(msg) {
+          this._msgCount++;
+          if (msg.type === 'status') { this.redisOk = !!msg.redis; return; }
+
+          const d = msg.data || {};
+          if (msg.type === 'cex') { this.onCex(d); return; }
+
+          // signal veya execution -> tabloya satir
+          const status = msg.type === 'execution' ? (d.karar || 'RED') : 'SINYAL';
+          this.pushRow(d, status);
+          if (d.ts) this.latency = Math.max(0, Date.now() - Number(d.ts)); // tek cikarma
+        },
+
+        pushRow(d, status) {
+          this.totalSignals++;
+          this.signals.unshift({
+            id: this._rowId++,
+            dir: d.dir || '?',
+            price: d.p_cex ? Number(d.p_cex).toFixed(4) : '—',
+            status,
+            time: new Date().toLocaleTimeString('tr-TR', { hour12: false })
+          });
+          if (this.signals.length > 5) this.signals.pop();   // sadece son 5
+        },
+
+        onCex(d) {
+          // mid = (bid+ask)/2 — tek ortalama, agir hesap degil.
+          const bid = Number(d.bid_p), ask = Number(d.ask_p);
+          if (!bid || !ask) return;
+          const mid = (bid + ask) / 2;
+          this.lastPrice = mid.toFixed(2);
+          this._prices.push(mid);
+          if (this._prices.length > 60) this._prices.shift();
+          this.drawSpark();
+        },
+
+        drawSpark() {
+          const cv = this.$refs.spark;
+          if (!cv) return;
+          const w = cv.width = cv.clientWidth, h = cv.height;
+          const ctx = cv.getContext('2d');
+          ctx.clearRect(0, 0, w, h);
+          const p = this._prices;
+          if (p.length < 2) return;
+          const min = Math.min(...p), max = Math.max(...p), rng = (max - min) || 1;
+          ctx.beginPath();
+          p.forEach((v, i) => {
+            const x = (i / (p.length - 1)) * w;
+            const y = h - ((v - min) / rng) * (h - 6) - 3;
+            i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+          });
+          ctx.strokeStyle = '#34d399';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+      };
+    }
+  </script>
+</body>

@@ -1,0 +1,33 @@
+# ===================================================================
+#  GHOST ORACLE v5.0  ::  In-Memory Data Bus
+#  SADECE Redis. Zero-Disk I/O + OOM korumasi.
+# ===================================================================
+services:
+  redis-in-memory:
+    image: redis:alpine
+    container_name: ghost-redis
+    restart: unless-stopped
+    # KISIT: Disk yazma tamamen KAPALI (--save "" + --appendonly no).
+    #        maxmemory Redis'i konteyner limitinin altinda tutar (OOM guvenligi).
+    command:
+      - "redis-server"
+      - "--save"
+      - ""
+      - "--appendonly"
+      - "no"
+      - "--maxmemory"
+      - "500mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+    ports:
+      - "6379:6379"
+    # KISIT: Banana Pi 2GB RAM — konteyner bellegini sinirla.
+    deploy:
+      resources:
+        limits:
+          memory: 600M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
