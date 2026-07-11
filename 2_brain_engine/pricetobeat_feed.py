@@ -31,7 +31,7 @@ _RX_CLOSED = re.compile(
 
 
 class PriceToBeatFeed:
-    def __init__(self, poll_sec: float = 5.0) -> None:
+    def __init__(self, poll_sec: float = 3.0) -> None:
         self.price: float = 0.0            # aktif pencere openPrice (Price to Beat)
         self.window_ts: int = 0            # aktif pencere ts
         self.closed: dict[int, tuple] = {} # {win_ts: (open, close)} kapanmis pencereler
@@ -54,6 +54,11 @@ class PriceToBeatFeed:
         for t, o, c in _RX_CLOSED.findall(html):
             ts = calendar.timegm(time.strptime(t, "%Y-%m-%dT%H:%M:%S"))
             closed[ts] = (float(o), float(c))
+
+        # Rollover'da null-close girisi hazir degilse: bu pencerenin open'i =
+        # win_ts'te KAPANAN pencerenin close'u (zincirleme). Gecikmeyi ortadan kaldirir.
+        if active == 0.0 and win_ts in closed:
+            active = closed[win_ts][1]
         return active, closed
 
     async def run(self, stop) -> None:
@@ -74,7 +79,10 @@ class PriceToBeatFeed:
                             del self.closed[k]
             except Exception as exc:
                 log.error("[P2B] fetch hatasi: %s", exc)
+            # Adaptif: bu pencerenin open'ini henuz alamadiysak hizli tekrar dene (1s),
+            # aldiysak normal poll. Rollover gecikmesini minimize eder.
+            fast = self.window_ts != win_ts
             try:
-                await asyncio.wait_for(stop.wait(), timeout=self._poll)
+                await asyncio.wait_for(stop.wait(), timeout=1.0 if fast else self._poll)
             except asyncio.TimeoutError:
                 pass
