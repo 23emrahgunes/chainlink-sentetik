@@ -18,11 +18,8 @@ export PATH=$PATH:/usr/local/go/bin
 echo ">>> [1/4] Redis (in-memory) kontrol"
 docker compose up -d
 
-echo ">>> [2/4] Go ingestion binary kontrol"
-if [ ! -x 1_ingestion_agents/ghost-ingestion ]; then
-  echo "    binary yok — derleniyor..."
-  ( cd 1_ingestion_agents && go mod tidy && go build -o ghost-ingestion . )
-fi
+echo ">>> [2/4] Go ingestion derleniyor (her zaman — kaynak degismis olabilir; Go cache'li)"
+( cd 1_ingestion_agents && go mod tidy && go build -o ghost-ingestion . )
 
 echo ">>> [3/4] Eski tmux oturumu kapatiliyor (varsa)"
 tmux kill-session -t ghost 2>/dev/null || true
