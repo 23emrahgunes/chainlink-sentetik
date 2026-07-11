@@ -22,6 +22,10 @@ type bybitMsg struct {
 var bybitPool = sync.Pool{New: func() interface{} { return new(bybitMsg) }}
 
 func BybitAdapter(url string) CEXAdapter {
+	// orderbook.1 = depth 1: [0] her zaman en iyi seviye. Deltalar tek-tarafli
+	// gelebilir; son bilinen tarafi hatirla ki her guncellemede yayinlayabilelim.
+	// (Parse tek goroutine'den cagrilir — yaris yok.)
+	var bp, bq, ap, aq string
 	return CEXAdapter{
 		Name:         "bybit",
 		URL:          url,
@@ -36,18 +40,17 @@ func BybitAdapter(url string) CEXAdapter {
 			if err := json.Unmarshal(msg, m); err != nil {
 				return nil, false
 			}
-			// snapshot/delta yalnizca iki taraf da doluysa yayinla.
-			if len(m.Data.B) == 0 || len(m.Data.A) == 0 {
-				return nil, false
+			// Son bilinen bid/ask'i guncelle (qty "0" = seviye kaldirildi, atla).
+			if len(m.Data.B) > 0 && len(m.Data.B[0]) >= 2 && m.Data.B[0][1] != "0" {
+				bp, bq = m.Data.B[0][0], m.Data.B[0][1]
 			}
-			if len(m.Data.B[0]) < 2 || len(m.Data.A[0]) < 2 {
-				return nil, false
+			if len(m.Data.A) > 0 && len(m.Data.A[0]) >= 2 && m.Data.A[0][1] != "0" {
+				ap, aq = m.Data.A[0][0], m.Data.A[0][1]
 			}
-			return &TopOfBook{
-				Src:  "bybit",
-				BidP: m.Data.B[0][0], BidQ: m.Data.B[0][1],
-				AskP: m.Data.A[0][0], AskQ: m.Data.A[0][1],
-			}, true
+			if bp == "" || ap == "" {
+				return nil, false // henuz iki taraf da gelmedi
+			}
+			return &TopOfBook{Src: "bybit", BidP: bp, BidQ: bq, AskP: ap, AskQ: aq}, true
 		},
 	}
 }

@@ -53,6 +53,7 @@ async def run(stop: asyncio.Event) -> None:
     window_sec = int(os.getenv("UPDOWN_WINDOW_SEC", "300"))   # 5dk = 300
     move_band = float(os.getenv("SIGNAL_MOVE_BAND", "0.0001"))  # acilis etrafinda olu bolge (%0.01)
     signal_cooldown_ms = float(os.getenv("SIGNAL_COOLDOWN_MS", "2000"))
+    quote_ttl_ms = float(os.getenv("QUOTE_TTL_MS", "4000"))  # borsa "taze" sayilma penceresi
 
     log.info("=== GHOST ORACLE v5.0 :: Analytical Brain ===")
     log.info("TRADING_MODE = %s", mode)
@@ -106,7 +107,7 @@ async def run(stop: asyncio.Event) -> None:
 
             # --- SENTETIK KURESEL FIYAT: 5 borsanin TAZE kotasyonlari (hacim-agirlikli) ---
             # Diziler <=10 elemanlik veri toplamadir; asil hesap (VWAP/OBI) NumPy C-level.
-            fresh = [q for q in quotes.values() if now_ms - q["ts"] <= 2000]
+            fresh = [q for q in quotes.values() if now_ms - q["ts"] <= quote_ttl_ms]
             prices = np.array([x for q in fresh for x in (q["bid_p"], q["ask_p"])], dtype=np.float64)
             vols = np.array([x for q in fresh for x in (q["bid_q"], q["ask_q"])], dtype=np.float64)
 

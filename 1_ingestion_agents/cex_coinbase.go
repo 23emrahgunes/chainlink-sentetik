@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-const coinbaseProduct = "BTC-USDT"
+const coinbaseProduct = "BTC-USD" // USDT cifti Coinbase'de ince; USD cok daha aktif
 
 type coinbaseTicker struct {
 	Type        string `json:"type"`
