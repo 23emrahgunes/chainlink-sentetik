@@ -76,9 +76,12 @@ async def run(stop: asyncio.Event) -> None:
     # Price to Beat: Polymarket'in aktif pencere openPrice'i (birebir kaynak).
     p2b = PriceToBeatFeed()
     p2b_task = asyncio.ensure_future(p2b.run(stop))
-    # Kagit-ustu trader (DRY_RUN, $1): momentum + Polymarket teyidi.
-    trader = PaperTrader(stake=float(os.getenv("PAPER_STAKE", "1.0")),
-                         lock_after_sec=int(os.getenv("PAPER_LOCK_AFTER_SEC", "60")))
+    # Kagit-ustu trader (DRY_RUN, $1): LATENCY-ARB (kapanisa yakin, net hareket + ucuz oran).
+    trader = PaperTrader(
+        stake=float(os.getenv("PAPER_STAKE", "1.0")),
+        lock_before_close=int(os.getenv("PAPER_LOCK_BEFORE_CLOSE_SEC", "30")),
+        min_move=float(os.getenv("LATENCY_MIN_MOVE", "0.0003")),
+        value_max=float(os.getenv("LATENCY_VALUE_MAX", "0.90")))
     last_pnl_pub = 0.0
 
     # 5 borsanin en son kotasyonu (src -> quote). Sentetik kuresel fiyat icin.
@@ -184,7 +187,7 @@ async def run(stop: asyncio.Event) -> None:
             # --- Kagit-ustu trade + PnL (momentum + Polymarket teyidi) ---
             win_ts = win * window_sec
             now_sec = int(now_ms // 1000)
-            trader.update(win_ts, now_sec, cand_dir, poly_up, spot_open, p2b.closed)
+            trader.update(win_ts, now_sec, spot_ref, strike, poly_up, p2b.closed)
             # Settle edilen islemleri gecmis tablosu icin yayinla.
             for rec in trader.drain():
                 try:
