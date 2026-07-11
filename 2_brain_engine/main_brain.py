@@ -25,6 +25,7 @@ from paper_trader import PaperTrader
 from polymarket_feed import PolyFeed
 from pricetobeat_feed import PriceToBeatFeed
 from redis_consumer import RedisConsumer
+from usdt_feed import UsdtUsdFeed
 from synthetic_oracle import compute_pcex
 from trigger_logic import emit
 
@@ -61,6 +62,8 @@ async def run(stop: asyncio.Event) -> None:
     obi_entry = float(os.getenv("OBI_ENTRY", "0.25"))        # |OBI| bu esigi asinca tahmin
     # USD-spot borsalar: Chainlink/Polymarket referansina en yakin (perp primi yok).
     spot_sources = set(os.getenv("SPOT_SOURCES", "coinbase,kraken").split(","))
+    # USDT-quote borsalar: fiyatlari USDT/USD kuruyla USD'ye cevrilir.
+    usdt_sources = set(os.getenv("USDT_SOURCES", "binance,bybit,okx").split(","))
 
     log.info("=== GHOST ORACLE v5.0 :: Analytical Brain ===")
     log.info("TRADING_MODE = %s", mode)
@@ -79,6 +82,9 @@ async def run(stop: asyncio.Event) -> None:
     # Price to Beat: Polymarket'in aktif pencere openPrice'i (birebir kaynak).
     p2b = PriceToBeatFeed()
     p2b_task = asyncio.ensure_future(p2b.run(stop))
+    # USDT/USD kuru (Tether piyasalarini USD'ye cevirmek icin).
+    usdt = UsdtUsdFeed()
+    usdt_task = asyncio.ensure_future(usdt.run(stop))
     # Kagit-ustu trader (DRY_RUN, $1): OBI-suruculu — derinlik baskisini sezip
     # fiyat kirilmadan once yon tahmini.
     trader = PaperTrader(
@@ -119,6 +125,10 @@ async def run(stop: asyncio.Event) -> None:
             src = field.get("src", "?")
             bid_p, bid_q = _f(field, "bid_p"), _f(field, "bid_q")
             ask_p, ask_q = _f(field, "ask_p"), _f(field, "ask_q")
+            # Tether piyasalarini (Binance/Bybit/OKX) USDT/USD kuruyla USD'ye cevir.
+            if src in usdt_sources:
+                bid_p *= usdt.rate
+                ask_p *= usdt.rate
             # derinlik hacmi (tum seviyeler); yoksa top seviyeye dus
             bid_vol = _f(field, "bid_vol") or bid_q
             ask_vol = _f(field, "ask_vol") or ask_q
@@ -186,7 +196,8 @@ async def run(stop: asyncio.Event) -> None:
                         "stream:synthetic",
                         {"p_cex": f"{p_cex:.4f}", "spot_ref": f"{spot_ref:.4f}",
                          "sources": str(n_src), "strike": f"{strike:.2f}",
-                         "obi": f"{obi_ema:.4f}", "ts": str(int(now_ms))},
+                         "obi": f"{obi_ema:.4f}", "usdt": f"{usdt.rate:.5f}",
+                         "ts": str(int(now_ms))},
                         maxlen=10, approximate=True,
                     )
                 except Exception as exc:
@@ -227,6 +238,7 @@ async def run(stop: asyncio.Event) -> None:
     finally:
         poly_task.cancel()
         p2b_task.cancel()
+        usdt_task.cancel()
         await stream.aclose()
         await consumer.close()
         log.info("[BRAIN] tuketici kapatildi. Atilan(bayat) kayit: %d",
