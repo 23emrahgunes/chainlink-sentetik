@@ -30,6 +30,24 @@
     </div>
   </header>
 
+  <!-- SENTETIK KURESEL FIYAT (P_cex) — 5 borsa hacim-agirlikli -->
+  <section class="card rounded-xl border border-emerald-800/50 p-5 mb-6 shadow-xl">
+    <div class="flex items-center justify-between flex-wrap gap-2">
+      <div>
+        <p class="text-xs uppercase tracking-[0.3em] text-emerald-500/80">Sentetik Küresel BTC Fiyatı · P_cex</p>
+        <p class="text-4xl sm:text-5xl font-bold tabular-nums text-emerald-400 glow mt-1">
+          <span x-text="synthPrice ? '$' + synthPrice : '—'"></span>
+        </p>
+      </div>
+      <div class="text-right">
+        <p class="text-xs uppercase tracking-widest text-slate-500">Aktif Borsa</p>
+        <p class="text-3xl font-bold tabular-nums text-slate-200"
+           x-text="(synthSources || 0) + '/5'"></p>
+        <p class="text-[11px] text-slate-600 mt-1">hacim-ağırlıklı VWAP</p>
+      </div>
+    </div>
+  </section>
+
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <!-- Kutu 1: Son 5 Sinyal -->
     <section class="card lg:col-span-2 rounded-xl border border-slate-800 p-5 shadow-xl">
@@ -107,6 +125,16 @@
           </span>
         </div>
         <div class="flex items-center justify-between">
+          <span class="text-slate-400">Son Karar</span>
+          <span class="font-semibold"
+                :class="{
+                  'text-emerald-400': lastKarar === 'ONAYLI',
+                  'text-rose-400': lastKarar === 'RED',
+                  'text-slate-600': !lastKarar
+                }"
+                x-text="lastKarar ? (lastKarar + ' · ' + lastKararDir) : '—'"></span>
+        </div>
+        <div class="flex items-center justify-between">
           <span class="text-slate-400">Toplam Sinyal</span>
           <span class="font-semibold tabular-nums text-slate-200" x-text="totalSignals"></span>
         </div>
@@ -132,6 +160,10 @@
         totalSignals: 0,
         lastPrice: null,
         msgRate: 0,
+        synthPrice: null,     // sentetik kuresel P_cex (5 borsa VWAP)
+        synthSources: 0,      // taze borsa sayisi
+        lastKarar: null,      // son execution karari (ONAYLI/RED)
+        lastKararDir: '',     // son karar yonu (LONG/SHORT)
         _prices: [],          // sparkline icin son ~60 mid nokta
         _rowId: 0,
         _msgCount: 0,
@@ -160,8 +192,18 @@
           const d = msg.data || {};
           if (msg.type === 'cex') { this.onCex(d); return; }
 
+          if (msg.type === 'synthetic') {         // sentetik kuresel fiyat
+            this.synthPrice = Number(d.p_cex).toFixed(2);
+            this.synthSources = Number(d.sources) || 0;
+            return;
+          }
+
           // signal veya execution -> tabloya satir
           const status = msg.type === 'execution' ? (d.karar || 'RED') : 'SINYAL';
+          if (msg.type === 'execution') {         // son karari ayrica sabitle
+            this.lastKarar = d.karar || 'RED';
+            this.lastKararDir = d.dir || '';
+          }
           this.pushRow(d, status);
           if (d.ts) this.latency = Math.max(0, Date.now() - Number(d.ts)); // tek cikarma
         },

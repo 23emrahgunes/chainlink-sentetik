@@ -9,6 +9,7 @@ RPC erisilemezse DRY_RUN'in cokmemesi icin fallback base_fee kullanilir.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -44,7 +45,8 @@ async def compute_gas(w3, priority_gwei: int = 5) -> dict:
     source = "chain"
 
     try:
-        block = await w3.eth.get_block("latest")
+        # KISIT: public RPC yavas/yanitsizsa 2s'de kes — execution asla kilitlenmesin.
+        block = await asyncio.wait_for(w3.eth.get_block("latest"), timeout=2.0)
         base_fee = block.get("baseFeePerGas")
         if base_fee is None:
             raise ValueError("baseFeePerGas yok (pre-EIP1559 blok?)")

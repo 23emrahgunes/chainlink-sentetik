@@ -15,6 +15,7 @@ import logging
 import os
 import signal
 import sys
+import time
 
 import numpy as np
 from dotenv import load_dotenv
@@ -70,6 +71,10 @@ async def run(stop: asyncio.Event) -> None:
     poly = PolyFeed(consumer.client)
     poly_task = asyncio.ensure_future(poly.run(stop))
 
+    # 5 borsanin en son kotasyonu (src -> quote). Sentetik kuresel fiyat icin.
+    quotes: dict[str, dict] = {}
+    last_synth_pub = 0.0
+
     stream = consumer.stream()
     try:
         while not stop.is_set():
@@ -89,17 +94,38 @@ async def run(stop: asyncio.Event) -> None:
             except StopAsyncIteration:
                 break
 
-            # --- NumPy vektorel hesap (dongu-yerel array'ler) ---
+            # --- Bu borsanin son kotasyonunu kaydet ---
+            src = field.get("src", "?")
             bid_p, bid_q = _f(field, "bid_p"), _f(field, "bid_q")
             ask_p, ask_q = _f(field, "ask_p"), _f(field, "ask_q")
+            now_ms = time.time() * 1000.0
+            quotes[src] = {"bid_p": bid_p, "bid_q": bid_q,
+                           "ask_p": ask_p, "ask_q": ask_q, "ts": now_ms}
 
-            bid_vols = np.array([bid_q], dtype=np.float64)
-            ask_vols = np.array([ask_q], dtype=np.float64)
-            prices = np.array([bid_p, ask_p], dtype=np.float64)
-            vols = np.array([bid_q, ask_q], dtype=np.float64)
+            # --- SENTETIK KURESEL FIYAT: 5 borsanin TAZE kotasyonlari (hacim-agirlikli) ---
+            # Diziler <=10 elemanlik veri toplamadir; asil hesap (VWAP/OBI) NumPy C-level.
+            fresh = [q for q in quotes.values() if now_ms - q["ts"] <= 2000]
+            prices = np.array([x for q in fresh for x in (q["bid_p"], q["ask_p"])], dtype=np.float64)
+            vols = np.array([x for q in fresh for x in (q["bid_q"], q["ask_q"])], dtype=np.float64)
+            bid_vols = np.array([q["bid_q"] for q in fresh], dtype=np.float64)
+            ask_vols = np.array([q["ask_q"] for q in fresh], dtype=np.float64)
 
             obi = compute_obi(bid_vols, ask_vols)
-            p_cex = compute_pcex(prices, vols)
+            p_cex = compute_pcex(prices, vols)   # 5 borsa sentetik VWAP
+            n_src = len(fresh)
+
+            # Sentetik fiyati dashboard icin yayinla (throttle ~300ms, MAXLEN ~10).
+            if now_ms - last_synth_pub >= 300:
+                last_synth_pub = now_ms
+                try:
+                    await consumer.client.xadd(
+                        "stream:synthetic",
+                        {"p_cex": f"{p_cex:.4f}", "sources": str(n_src),
+                         "ts": str(int(now_ms))},
+                        maxlen=10, approximate=True,
+                    )
+                except Exception as exc:
+                    log.error("[SYNTH] xadd hatasi: %s", exc)
 
             # --- Spread makasi: Polymarket taze ise gercek capraz-pazar, degilse proxy ---
             p_poly, poly_fresh = poly.snapshot(max_stale_ms=2000)
@@ -111,8 +137,8 @@ async def run(stop: asyncio.Event) -> None:
                 spread = (ask_p - bid_p) / mid if mid > 0 else 0.0
                 spread_src = "intrabook"
 
-            log.info("P_cex=%.4f | OBI=%+.3f | spread=%.5f [%s] | src=%s",
-                     p_cex, obi, spread, spread_src, field.get("src", "?"))
+            log.info("P_cex(sentetik)=%.4f [%d borsa] | OBI=%+.3f | spread=%.5f [%s]",
+                     p_cex, n_src, obi, spread, spread_src)
 
             await evaluate(p_cex, obi, spread, obi_thr, spread_thr, consumer.client)
     finally:

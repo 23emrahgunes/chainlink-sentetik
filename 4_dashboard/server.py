@@ -33,6 +33,7 @@ HERE = Path(__file__).parent
 
 # stream anahtari -> istemciye gidecek mesaj tipi
 STREAMS = {
+    "stream:synthetic": "synthetic",
     "stream:signals": "signal",
     "stream:executions": "execution",
     "stream:cex_l2": "cex",
