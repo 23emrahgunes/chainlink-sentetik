@@ -11,9 +11,10 @@ import (
 
 // Redis Stream anahtarlari.
 const (
-	StreamCEX  = "stream:cex_l2"
-	StreamDEX  = "stream:dex_mempool"
-	StreamPoly = "stream:polymarket"
+	StreamCEX       = "stream:cex_l2"
+	StreamDEX       = "stream:dex_mempool"
+	StreamPoly      = "stream:polymarket"
+	StreamChainlink = "stream:chainlink"
 
 	// KISIT: Banana Pi 2GB — her stream'de en fazla ~10 kayit tutulur.
 	streamMaxLen = 10

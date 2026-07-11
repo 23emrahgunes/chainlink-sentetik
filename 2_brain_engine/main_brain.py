@@ -20,6 +20,7 @@ import time
 import numpy as np
 from dotenv import load_dotenv
 
+from chainlink_feed import ChainlinkFeed
 from polymarket_feed import PolyFeed
 from redis_consumer import RedisConsumer
 from synthetic_oracle import compute_pcex
@@ -68,9 +69,11 @@ async def run(stop: asyncio.Event) -> None:
     log.info("[REDIS] baglandi @ %s | price-to-beat=%s | move band=%%%.3f",
              addr, strike_mode, move_band * 100)
 
-    # Polymarket fiyat beslemesi (arka plan; token yoksa stream bos kalir, sorunsuz).
+    # Polymarket + Chainlink fiyat beslemeleri (arka plan gorevler).
     poly = PolyFeed(consumer.client)
     poly_task = asyncio.ensure_future(poly.run(stop))
+    chainlink = ChainlinkFeed(consumer.client)
+    chainlink_task = asyncio.ensure_future(chainlink.run(stop))
 
     # 5 borsanin en son kotasyonu (src -> quote). Sentetik kuresel fiyat icin.
     quotes: dict[str, dict] = {}
@@ -126,16 +129,20 @@ async def run(stop: asyncio.Event) -> None:
             else:
                 spot_ref = p_cex   # spot yoksa sentetige dus
 
-            # --- PRICE TO BEAT: sabit (env) ya da 5dk pencere acilis SPOT fiyati ---
+            # --- PRICE TO BEAT: sabit (env) ya da 5dk pencere acilisinda Chainlink BTC/USD ---
+            # Polymarket'in cozum kaynagi Chainlink oldugu icin hedef = pencere acilis
+            # Chainlink fiyati (taze degilse spot referansa dus).
             if fixed_strike > 0:
                 strike = fixed_strike
             else:
                 win = int(now_ms // 1000 // window_sec)
                 if win != cur_win:
                     cur_win = win
-                    strike_dyn = spot_ref     # yeni pencere -> acilis spot fiyati = hedef
-                    log.info("[PENCERE] yeni %ddk pencere -> price-to-beat(spot)=%.2f",
-                             window_sec // 60, strike_dyn)
+                    cl_price, cl_fresh = chainlink.snapshot(max_stale_ms=20000)
+                    strike_dyn = cl_price if cl_fresh else spot_ref
+                    log.info("[PENCERE] yeni %ddk pencere -> price-to-beat=%.2f (%s)",
+                             window_sec // 60, strike_dyn,
+                             "Chainlink" if cl_fresh else "spot-fallback")
                 strike = strike_dyn
 
             # --- YON: spot referans acilisa gore yukari/asagi (market'in cozdugu sey) ---
@@ -169,6 +176,7 @@ async def run(stop: asyncio.Event) -> None:
                 last_dir, last_emit_ms = emitted, now_ms
     finally:
         poly_task.cancel()
+        chainlink_task.cancel()
         await stream.aclose()
         await consumer.close()
         log.info("[BRAIN] tuketici kapatildi. Atilan(bayat) kayit: %d",

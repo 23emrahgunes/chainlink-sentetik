@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -37,6 +38,8 @@ func main() {
 	dexURL := getenv("POLYGON_WSS", "wss://polygon-bor-rpc.publicnode.com")
 	polyURL := getenv("POLYMARKET_WSS", "wss://ws-subscriptions-clob.polymarket.com/ws/market")
 	polyToken := getenv("POLYMARKET_TOKEN_ID", "")
+	rpcURL := getenv("POLYGON_RPC", "https://polygon-rpc.com")
+	clEvery, _ := strconv.Atoi(getenv("CHAINLINK_POLL_SEC", "5"))
 
 	// 5 CEX adapter'i (.env'den URL, bos ise RunCEX atlar).
 	cexAdapters := []CEXAdapter{
@@ -68,13 +71,14 @@ func main() {
 
 	// --- Ajanlari baslat ---
 	var wg sync.WaitGroup
-	wg.Add(len(cexAdapters) + 2) // 5 CEX + 1 DEX + 1 Polymarket
+	wg.Add(len(cexAdapters) + 3) // 5 CEX + 1 DEX + 1 Polymarket + 1 Chainlink
 	for _, a := range cexAdapters {
 		go RunCEX(rootCtx, &wg, pub, a)
 	}
 	go RunDEXAgent(rootCtx, &wg, pub, dexURL)
 	go RunPolymarketAgent(rootCtx, &wg, pub, polyURL, polyToken)
-	log.Printf("[MAIN] %d CEX + 1 DEX + 1 Polymarket ajani calisiyor. Durdurmak icin Ctrl+C.", len(cexAdapters))
+	go RunChainlinkAgent(rootCtx, &wg, pub, rpcURL, clEvery)
+	log.Printf("[MAIN] %d CEX + DEX + Polymarket + Chainlink ajani calisiyor. Ctrl+C ile durdur.", len(cexAdapters))
 
 	// --- Graceful Shutdown ---
 	sig := make(chan os.Signal, 1)
