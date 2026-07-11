@@ -54,6 +54,8 @@ async def run(stop: asyncio.Event) -> None:
     move_band = float(os.getenv("SIGNAL_MOVE_BAND", "0.0001"))  # acilis etrafinda olu bolge (%0.01)
     signal_cooldown_ms = float(os.getenv("SIGNAL_COOLDOWN_MS", "2000"))
     quote_ttl_ms = float(os.getenv("QUOTE_TTL_MS", "4000"))  # borsa "taze" sayilma penceresi
+    # USD-spot borsalar: Chainlink/Polymarket referansina en yakin (perp primi yok).
+    spot_sources = set(os.getenv("SPOT_SOURCES", "coinbase,kraken").split(","))
 
     log.info("=== GHOST ORACLE v5.0 :: Analytical Brain ===")
     log.info("TRADING_MODE = %s", mode)
@@ -106,28 +108,38 @@ async def run(stop: asyncio.Event) -> None:
                            "ask_p": ask_p, "ask_q": ask_q, "ts": now_ms}
 
             # --- SENTETIK KURESEL FIYAT: 5 borsanin TAZE kotasyonlari (hacim-agirlikli) ---
-            # Diziler <=10 elemanlik veri toplamadir; asil hesap (VWAP/OBI) NumPy C-level.
-            fresh = [q for q in quotes.values() if now_ms - q["ts"] <= quote_ttl_ms]
+            # Diziler <=10 elemanlik veri toplamadir; asil hesap (VWAP) NumPy C-level.
+            fresh = [q for s, q in quotes.items() if now_ms - q["ts"] <= quote_ttl_ms]
             prices = np.array([x for q in fresh for x in (q["bid_p"], q["ask_p"])], dtype=np.float64)
             vols = np.array([x for q in fresh for x in (q["bid_q"], q["ask_q"])], dtype=np.float64)
-
-            p_cex = compute_pcex(prices, vols)      # 5 borsa sentetik VWAP
+            p_cex = compute_pcex(prices, vols)      # 5 borsa sentetik (perp dahil)
             n_src = len(fresh)
 
-            # --- PRICE TO BEAT: sabit (env) ya da 5dk pencere acilis fiyati ---
+            # --- PIYASA REFERANSI (spot): sadece USD-spot borsalar (Coinbase/Kraken) ---
+            # Chainlink/Polymarket'in kullandigi spot fiyata en yakin; perp primi yok.
+            spot_q = [q for s, q in quotes.items()
+                      if s in spot_sources and now_ms - q["ts"] <= quote_ttl_ms]
+            if spot_q:
+                sp = np.array([x for q in spot_q for x in (q["bid_p"], q["ask_p"])], dtype=np.float64)
+                sv = np.array([x for q in spot_q for x in (q["bid_q"], q["ask_q"])], dtype=np.float64)
+                spot_ref = compute_pcex(sp, sv)
+            else:
+                spot_ref = p_cex   # spot yoksa sentetige dus
+
+            # --- PRICE TO BEAT: sabit (env) ya da 5dk pencere acilis SPOT fiyati ---
             if fixed_strike > 0:
                 strike = fixed_strike
             else:
                 win = int(now_ms // 1000 // window_sec)
                 if win != cur_win:
                     cur_win = win
-                    strike_dyn = p_cex        # yeni pencere -> acilis fiyati = hedef
-                    log.info("[PENCERE] yeni %ddk pencere -> price-to-beat=%.2f",
+                    strike_dyn = spot_ref     # yeni pencere -> acilis spot fiyati = hedef
+                    log.info("[PENCERE] yeni %ddk pencere -> price-to-beat(spot)=%.2f",
                              window_sec // 60, strike_dyn)
                 strike = strike_dyn
 
-            # --- YON: acilisa gore yukari/asagi (market'in cozdugu sey) ---
-            move = (p_cex - strike) / strike if strike > 0 else 0.0
+            # --- YON: spot referans acilisa gore yukari/asagi (market'in cozdugu sey) ---
+            move = (spot_ref - strike) / strike if strike > 0 else 0.0
             cand_dir = "LONG" if move >= 0 else "SHORT"   # LONG=Up, SHORT=Down
 
             # Polymarket Up olasiligi (taze degilse -1 = veri yok)
@@ -135,14 +147,15 @@ async def run(stop: asyncio.Event) -> None:
             if not poly_fresh:
                 poly_up = -1.0
 
-            # Sentetik fiyati dashboard icin yayinla (throttle ~300ms, MAXLEN ~10).
+            # Dashboard yayini (throttle ~300ms, MAXLEN ~10).
             if now_ms - last_synth_pub >= 300:
                 last_synth_pub = now_ms
                 try:
                     await consumer.client.xadd(
                         "stream:synthetic",
-                        {"p_cex": f"{p_cex:.4f}", "sources": str(n_src),
-                         "strike": f"{strike:.2f}", "ts": str(int(now_ms))},
+                        {"p_cex": f"{p_cex:.4f}", "spot_ref": f"{spot_ref:.4f}",
+                         "sources": str(n_src), "strike": f"{strike:.2f}",
+                         "ts": str(int(now_ms))},
                         maxlen=10, approximate=True,
                     )
                 except Exception as exc:
@@ -151,7 +164,7 @@ async def run(stop: asyncio.Event) -> None:
             # --- Sinyal: olu bolge disinda + (yon degisti VEYA cooldown doldu) ---
             if abs(move) >= move_band and (cand_dir != last_dir
                                            or now_ms - last_emit_ms > signal_cooldown_ms):
-                emitted = await emit(cand_dir, p_cex, strike, poly_up, move,
+                emitted = await emit(cand_dir, spot_ref, strike, poly_up, move,
                                      consumer.client)
                 last_dir, last_emit_ms = emitted, now_ms
     finally:
