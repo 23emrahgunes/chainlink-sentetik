@@ -48,11 +48,11 @@
          x-text="strike && synthPrice ? (Number(synthPrice) >= Number(strike) ? '▲ hedefin ÜSTÜNDE' : '▼ hedefin ALTINDA') : 'hedef ayarsız'"></p>
     </div>
     <div class="card rounded-xl border border-sky-800/40 p-4 shadow-xl">
-      <p class="text-[11px] uppercase tracking-[0.2em] text-sky-500/80">Polymarket YES</p>
+      <p class="text-[11px] uppercase tracking-[0.2em] text-sky-500/80">Polymarket · UP olasılığı</p>
       <p class="text-2xl sm:text-3xl font-bold tabular-nums text-sky-400 mt-1"
          x-text="polyPrice !== null ? (polyPrice * 100).toFixed(1) + '%' : '—'"></p>
       <p class="text-[11px] text-slate-600 mt-1"
-         x-text="polyPrice !== null ? 'olasılık (0..1)' : 'TOKEN_ID gerekli'"></p>
+         x-text="polyPrice !== null ? '5dk BTC up/down (Chainlink)' : 'market bekleniyor'"></p>
     </div>
     <div class="card rounded-xl border border-slate-800 p-4 shadow-xl">
       <p class="text-[11px] uppercase tracking-[0.2em] text-slate-500">Aktif Borsa</p>
@@ -82,7 +82,7 @@
                 <td class="py-2 text-slate-500" x-text="row.time"></td>
                 <td class="py-2 font-bold"
                     :class="row.dir === 'LONG' ? 'text-emerald-400' : 'text-rose-400'">
-                  <span x-text="row.dir === 'LONG' ? '▲ LONG' : '▼ SHORT'"></span>
+                  <span x-text="row.dir === 'LONG' ? '▲ UP' : '▼ DOWN'"></span>
                 </td>
                 <td class="py-2 text-right tabular-nums text-slate-300" x-text="row.price"></td>
                 <td class="py-2 text-right">
@@ -224,7 +224,7 @@
           const status = msg.type === 'execution' ? (d.karar || 'RED') : 'SINYAL';
           if (msg.type === 'execution') {         // son karari ayrica sabitle
             this.lastKarar = d.karar || 'RED';
-            this.lastKararDir = d.dir || '';
+            this.lastKararDir = d.dir === 'LONG' ? 'UP' : (d.dir === 'SHORT' ? 'DOWN' : '');
           }
           this.pushRow(d, status);
           if (d.ts) this.latency = Math.max(0, Date.now() - Number(d.ts)); // tek cikarma

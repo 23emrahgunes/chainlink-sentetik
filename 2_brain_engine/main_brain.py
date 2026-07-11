@@ -20,12 +20,10 @@ import time
 import numpy as np
 from dotenv import load_dotenv
 
-from obi_matrix import compute_obi
 from polymarket_feed import PolyFeed
 from redis_consumer import RedisConsumer
-from spread_model import cross_spread
 from synthetic_oracle import compute_pcex
-from trigger_logic import evaluate
+from trigger_logic import emit
 
 # .env: once kok dizin (Ajan 1 ile ayni desen), sonra yerel.
 load_dotenv("../.env")
@@ -51,12 +49,9 @@ async def run(stop: asyncio.Event) -> None:
     mode = os.getenv("TRADING_MODE", "DRY_RUN")
     addr = os.getenv("REDIS_ADDR", "127.0.0.1:6379")
     password = os.getenv("REDIS_PASSWORD", "")
-    obi_thr = float(os.getenv("OBI_THRESHOLD", "0.6"))
-    spread_thr = float(os.getenv("SPREAD_THRESHOLD", "0.0"))
-    # Polymarket fair-value esleme parametreleri (PLACEHOLDER model, bkz spread_model.py).
-    pm_base = float(os.getenv("PM_FAIR_BASE", "0.0"))
-    pm_scale = float(os.getenv("PM_FAIR_SCALE", "0.0"))
-    strike = float(os.getenv("PRICE_TO_BEAT", "0"))          # Polymarket hedef (price to beat)
+    fixed_strike = float(os.getenv("PRICE_TO_BEAT", "0"))     # >0 ise sabit; 0 ise dinamik pencere
+    window_sec = int(os.getenv("UPDOWN_WINDOW_SEC", "300"))   # 5dk = 300
+    move_band = float(os.getenv("SIGNAL_MOVE_BAND", "0.0001"))  # acilis etrafinda olu bolge (%0.01)
     signal_cooldown_ms = float(os.getenv("SIGNAL_COOLDOWN_MS", "2000"))
 
     log.info("=== GHOST ORACLE v5.0 :: Analytical Brain ===")
@@ -66,8 +61,9 @@ async def run(stop: asyncio.Event) -> None:
     if not await consumer.ping():
         log.error("[REDIS] ping BASARISIZ @ %s (docker compose up -d?)", addr)
         return
-    log.info("[REDIS] baglandi @ %s | OBI esik=%.2f spread esik=%.5f",
-             addr, obi_thr, spread_thr)
+    strike_mode = "sabit" if fixed_strike > 0 else "dinamik(%ddk pencere)" % (window_sec // 60)
+    log.info("[REDIS] baglandi @ %s | price-to-beat=%s | move band=%%%.3f",
+             addr, strike_mode, move_band * 100)
 
     # Polymarket fiyat beslemesi (arka plan; token yoksa stream bos kalir, sorunsuz).
     poly = PolyFeed(consumer.client)
@@ -78,6 +74,8 @@ async def run(stop: asyncio.Event) -> None:
     last_synth_pub = 0.0
     last_dir = ""          # sinyal spam onleme: son yon
     last_emit_ms = 0.0     # son sinyal zamani
+    cur_win = -1           # aktif 5dk pencere indeksi
+    strike_dyn = 0.0       # pencere acilis fiyati (dinamik price-to-beat)
 
     stream = consumer.stream()
     try:
@@ -111,12 +109,30 @@ async def run(stop: asyncio.Event) -> None:
             fresh = [q for q in quotes.values() if now_ms - q["ts"] <= 2000]
             prices = np.array([x for q in fresh for x in (q["bid_p"], q["ask_p"])], dtype=np.float64)
             vols = np.array([x for q in fresh for x in (q["bid_q"], q["ask_q"])], dtype=np.float64)
-            bid_vols = np.array([q["bid_q"] for q in fresh], dtype=np.float64)
-            ask_vols = np.array([q["ask_q"] for q in fresh], dtype=np.float64)
 
-            obi = compute_obi(bid_vols, ask_vols)
-            p_cex = compute_pcex(prices, vols)   # 5 borsa sentetik VWAP
+            p_cex = compute_pcex(prices, vols)      # 5 borsa sentetik VWAP
             n_src = len(fresh)
+
+            # --- PRICE TO BEAT: sabit (env) ya da 5dk pencere acilis fiyati ---
+            if fixed_strike > 0:
+                strike = fixed_strike
+            else:
+                win = int(now_ms // 1000 // window_sec)
+                if win != cur_win:
+                    cur_win = win
+                    strike_dyn = p_cex        # yeni pencere -> acilis fiyati = hedef
+                    log.info("[PENCERE] yeni %ddk pencere -> price-to-beat=%.2f",
+                             window_sec // 60, strike_dyn)
+                strike = strike_dyn
+
+            # --- YON: acilisa gore yukari/asagi (market'in cozdugu sey) ---
+            move = (p_cex - strike) / strike if strike > 0 else 0.0
+            cand_dir = "LONG" if move >= 0 else "SHORT"   # LONG=Up, SHORT=Down
+
+            # Polymarket Up olasiligi (taze degilse -1 = veri yok)
+            poly_up, poly_fresh = poly.snapshot(max_stale_ms=3000)
+            if not poly_fresh:
+                poly_up = -1.0
 
             # Sentetik fiyati dashboard icin yayinla (throttle ~300ms, MAXLEN ~10).
             if now_ms - last_synth_pub >= 300:
@@ -131,27 +147,12 @@ async def run(stop: asyncio.Event) -> None:
                 except Exception as exc:
                     log.error("[SYNTH] xadd hatasi: %s", exc)
 
-            # --- Spread makasi: Polymarket taze ise gercek capraz-pazar, degilse proxy ---
-            p_poly, poly_fresh = poly.snapshot(max_stale_ms=2000)
-            if poly_fresh:
-                spread = abs(cross_spread(p_cex, p_poly, pm_base, pm_scale))
-                spread_src = f"PM(mid={p_poly:.3f})"
-            else:
-                mid = (ask_p + bid_p) / 2.0            # intra-book fallback
-                spread = (ask_p - bid_p) / mid if mid > 0 else 0.0
-                spread_src = "intrabook"
-
-            log.info("P_cex(sentetik)=%.4f [%d borsa] | OBI=%+.3f | spread=%.5f [%s]",
-                     p_cex, n_src, obi, spread, spread_src)
-
-            # --- Sinyal spam onleme: sadece YON degisince VEYA cooldown dolunca degerlendir ---
-            cand_dir = "LONG" if obi > 0 else "SHORT"
-            if abs(obi) > obi_thr and (cand_dir != last_dir
-                                       or now_ms - last_emit_ms > signal_cooldown_ms):
-                emitted = await evaluate(p_cex, obi, spread, obi_thr, spread_thr,
-                                         consumer.client)
-                if emitted:
-                    last_dir, last_emit_ms = emitted, now_ms
+            # --- Sinyal: olu bolge disinda + (yon degisti VEYA cooldown doldu) ---
+            if abs(move) >= move_band and (cand_dir != last_dir
+                                           or now_ms - last_emit_ms > signal_cooldown_ms):
+                emitted = await emit(cand_dir, p_cex, strike, poly_up, move,
+                                     consumer.client)
+                last_dir, last_emit_ms = emitted, now_ms
     finally:
         poly_task.cancel()
         await stream.aclose()

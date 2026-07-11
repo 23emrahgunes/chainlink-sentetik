@@ -1,19 +1,13 @@
 """
 trigger_logic.py
-GHOST ORACLE v5.0 :: Ajan 2.4 — Sinyal tetikleyici (DRY_RUN).
+GHOST ORACLE v5.0 :: Ajan 2.4 — Sinyal emitter (BTC Up/Down 5m).
 
-Kural: |OBI| esigi ASILMIS  VE  spread esigi ASILMIS ise sinyal uret.
-  OBI > +0.6  -> LONG   (alis baskisi)
-  OBI < -0.6  -> SHORT  (satis baskisi)
+Yon (UP/DOWN) ve tetik karari CAGIRAN tarafta (main_brain) verilir; bu modul
+sadece sinyali loglar ve Redis 'stream:signals'e (MAXLEN ~10) async XADD eder.
 
-Sinyal uretildiginde:
-  1) konsola log basar,
-  2) Ajan 3'un tuketmesi icin Redis 'stream:signals' kanalina async XADD
-     (MAXLEN ~10, bellek dostu).
-DRY_RUN oldugu icin gercek emir YOK.
-
-NOT: Gercek Polymarket spread makasi Ajan 3'te gelecek. Su an intra-book
-spread (ask-bid)/mid proxy olarak kullanilir.
+Sinyal alanlari: dir, p_cex, strike (price to beat), poly_up (Polymarket Up
+olasiligi 0..1), move (acilisa gore oransal hareket), ts.
+DRY_RUN: gercek emir YOK.
 """
 from __future__ import annotations
 
@@ -21,38 +15,27 @@ import logging
 import time
 
 STREAM_SIGNALS = "stream:signals"
-SIGNAL_MAXLEN = 10  # 2GB RAM — bellek dostu trim
+SIGNAL_MAXLEN = 10
 
 log = logging.getLogger("brain.trigger")
 
 
-async def evaluate(
+async def emit(
+    direction: str,
     p_cex: float,
-    obi: float,
-    spread: float,
-    obi_threshold: float = 0.6,
-    spread_threshold: float = 0.0,
+    strike: float,
+    poly_up: float,
+    move: float,
     redis_client=None,
-) -> str | None:
+) -> str:
     """
-    Sinyal degerlendirir. Uretilirse yon ("LONG"/"SHORT") dondurur, aksi None.
-
-    redis_client verilirse (redis.asyncio.Redis), sinyal 'stream:signals'e
-    MAXLEN ~10 ile async XADD edilir. None ise sadece loglar (test/backward-compat).
+    Sinyali loglar ve stream:signals'e yayinlar. direction: 'LONG'(Up)/'SHORT'(Down).
+    poly_up < 0 ise Polymarket verisi yok demektir.
     """
-    if abs(obi) <= obi_threshold:
-        return None
-    if spread < spread_threshold:
-        return None
-
-    direction = "LONG" if obi > 0 else "SHORT"
-    log.info(
-        "[SINYAL URETILDI] Yon: %s, P_cex: %.4f  (OBI=%.3f, spread=%.5f)",
-        direction,
-        p_cex,
-        obi,
-        spread,
-    )
+    yon = "UP" if direction == "LONG" else "DOWN"
+    pm = "yok" if poly_up < 0 else f"{poly_up:.3f}"
+    log.info("[SINYAL] %s | P_cex=%.2f strike=%.2f move=%+.4f%% | Polymarket_Up=%s",
+             yon, p_cex, strike, move * 100, pm)
 
     if redis_client is not None:
         try:
@@ -61,14 +44,15 @@ async def evaluate(
                 {
                     "dir": direction,
                     "p_cex": f"{p_cex:.8f}",
-                    "obi": f"{obi:.6f}",
-                    "spread": f"{spread:.8f}",
+                    "strike": f"{strike:.8f}",
+                    "poly_up": f"{poly_up:.6f}",
+                    "move": f"{move:.8f}",
                     "ts": str(int(time.time() * 1000)),
                 },
                 maxlen=SIGNAL_MAXLEN,
-                approximate=True,  # MAXLEN ~10
+                approximate=True,
             )
-        except Exception as exc:  # sinyal kaybi kritik degil, akis sursun
+        except Exception as exc:  # sinyal kaybi kritik degil
             log.error("[SINYAL] stream:signals XADD hatasi: %s", exc)
 
     return direction

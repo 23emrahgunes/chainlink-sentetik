@@ -1,16 +1,23 @@
 // agent_polymarket.go
-// GHOST ORACLE v5.0 :: Ajan 1.3 — Polymarket CLOB fiyat beslemesi.
-// CLOB "market" WebSocket kanalindan bir outcome token'in order book'unu
-// dinler; en iyi bid/ask/mid (0..1 olasilik) degerini stream:polymarket'e basar.
+// GHOST ORACLE v5.0 :: Ajan 1.3 — Polymarket "BTC Up/Down 5m" DINAMIK feed.
 //
-// DOGRULAMA NOTU: Polymarket WS subscribe formati ve 'book' event semasi
-// resmi dokumana gore teyit edilmelidir. DRY_RUN icin plumbing tamdir.
+// Bu piyasalar 5 dakikalik ve Chainlink BTC/USD ile cozuluyor. Token id her
+// pencerede degisir. Ajan:
+//   1) zamandan aktif pencere slug'ini hesaplar (btc-updown-5m-<ts>, ts%300==0)
+//   2) gamma API'den "Up" outcome token id'sini cozer
+//   3) CLOB market WS'e abone olur, pencere bitene kadar mid (Up olasiligi) basar
+//   4) pencere bitince otomatik yeni markete gecer (rollover)
+//
+// stream:polymarket alanlari: src, token, up_prob(mid), window_ts, ts
+// (Statik POLYMARKET_TOKEN_ID verilirse rollover kapanir, o token kullanilir.)
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -18,12 +25,18 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const (
+	polyWindowSec = 300 // 5 dakika
+	gammaAPI      = "https://gamma-api.polymarket.com/markets?slug="
+)
+
+var polyHTTP = &http.Client{Timeout: 10 * time.Second}
+
 type polyLevel struct {
 	Price string `json:"price"`
 	Size  string `json:"size"`
 }
 
-// polyBookEvent: CLOB market kanali 'book' event'i (minimal).
 type polyBookEvent struct {
 	EventType string      `json:"event_type"`
 	AssetID   string      `json:"asset_id"`
@@ -31,13 +44,46 @@ type polyBookEvent struct {
 	Asks      []polyLevel `json:"asks"`
 }
 
-// RunPolymarketAgent: token feed baglanti dongusu (ctx iptaline kadar reconnect).
-func RunPolymarketAgent(ctx context.Context, wg *sync.WaitGroup, pub *MemoryPub, wssURL, tokenID string) {
+// gammaMarket: gamma API market objesinin ihtiyac duyulan alanlari.
+type gammaMarket struct {
+	ClobTokenIds string `json:"clobTokenIds"` // JSON-string dizi: ["Up","Down"]
+	Outcomes     string `json:"outcomes"`
+	Closed       bool   `json:"closed"`
+}
+
+// resolveUpToken: btc-updown-5m-<ts> slug'i icin "Up" outcome token id'sini coz.
+func resolveUpToken(slug string) (string, error) {
+	resp, err := polyHTTP.Get(gammaAPI + slug)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var markets []gammaMarket
+	if err := json.NewDecoder(resp.Body).Decode(&markets); err != nil {
+		return "", err
+	}
+	if len(markets) == 0 {
+		return "", fmt.Errorf("market bulunamadi: %s", slug)
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(markets[0].ClobTokenIds), &ids); err != nil {
+		return "", err
+	}
+	if len(ids) == 0 {
+		return "", fmt.Errorf("token yok: %s", slug)
+	}
+	return ids[0], nil // [0] = "Up", [1] = "Down"
+}
+
+// RunPolymarketAgent: dinamik 5dk market rollover dongusu.
+func RunPolymarketAgent(ctx context.Context, wg *sync.WaitGroup, pub *MemoryPub, wssURL, staticToken string) {
 	defer wg.Done()
-	if wssURL == "" || tokenID == "" {
-		log.Printf("[POLY] WSS veya TOKEN_ID bos — feed atlaniyor")
+	if wssURL == "" {
+		log.Printf("[POLY] WSS bos — feed atlaniyor")
 		return
 	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -45,18 +91,55 @@ func RunPolymarketAgent(ctx context.Context, wg *sync.WaitGroup, pub *MemoryPub,
 			return
 		default:
 		}
-		if err := connectPoly(ctx, pub, wssURL, tokenID); err != nil && ctx.Err() == nil {
-			log.Printf("[POLY] baglanti hatasi: %v — 3s sonra yeniden", err)
+
+		var token string
+		var winCtx context.Context
+		var winCancel context.CancelFunc
+		var winTS int64
+
+		if staticToken != "" {
+			// Statik mod — rollover yok.
+			token = staticToken
+			winTS = 0
+			winCtx, winCancel = context.WithCancel(ctx)
+		} else {
+			// Dinamik: aktif 5dk pencereyi coz.
+			now := time.Now().Unix()
+			winTS = (now / polyWindowSec) * polyWindowSec
+			slug := fmt.Sprintf("btc-updown-5m-%d", winTS)
+			t, err := resolveUpToken(slug)
+			if err != nil {
+				log.Printf("[POLY] token cozulemedi (%s): %v — 5s sonra", slug, err)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Second):
+				}
+				continue
+			}
+			token = t
+			// Pencere bitisinde (winTS+300) baglantiyi kapat, sonraki markete gec.
+			winEnd := time.Unix(winTS+polyWindowSec, 0)
+			winCtx, winCancel = context.WithDeadline(ctx, winEnd)
+			log.Printf("[POLY] aktif 5dk market ts=%d, Up token=%s... (bitis %s)",
+				winTS, token[:12], winEnd.UTC().Format("15:04:05"))
+		}
+
+		// WS'i pencere bitene / ctx iptaline kadar calistir.
+		err := connectPoly(winCtx, pub, wssURL, token, winTS)
+		winCancel()
+		if err != nil && ctx.Err() == nil {
+			log.Printf("[POLY] baglanti hatasi: %v", err)
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(3 * time.Second):
+			case <-time.After(2 * time.Second):
 			}
 		}
 	}
 }
 
-func connectPoly(ctx context.Context, pub *MemoryPub, wssURL, tokenID string) error {
+func connectPoly(ctx context.Context, pub *MemoryPub, wssURL, tokenID string, winTS int64) error {
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -69,14 +152,12 @@ func connectPoly(ctx context.Context, pub *MemoryPub, wssURL, tokenID string) er
 	connCtx, connCancel := context.WithCancel(ctx)
 	defer connCancel()
 
-	// market kanali abonelik mesaji.
 	sub := `{"assets_ids":["` + tokenID + `"],"type":"market"}`
 	if err := c.WriteMessage(websocket.TextMessage, []byte(sub)); err != nil {
 		return err
 	}
-	log.Printf("[POLY] market kanali abone: token=%s", tokenID)
 
-	// Keepalive: Polymarket "PING"/"PONG" (10s). Gerekmezse .env ile devre disi.
+	// Keepalive (Polymarket PING/PONG 10s).
 	go func() {
 		t := time.NewTicker(10 * time.Second)
 		defer t.Stop()
@@ -101,12 +182,13 @@ func connectPoly(ctx context.Context, pub *MemoryPub, wssURL, tokenID string) er
 	for {
 		_, msg, err := c.ReadMessage()
 		if err != nil {
+			// Pencere deadline'i doldu ise bu normal — hata degil, rollover.
+			if ctx.Err() != nil {
+				return nil
+			}
 			return err
 		}
-		// Mesaj bir event dizisi ya da tek event olabilir; ikisini de dene.
-		events := parsePolyEvents(msg)
-		for i := range events {
-			ev := &events[i]
+		for _, ev := range parsePolyEvents(msg) {
 			if ev.EventType != "book" || len(ev.Bids) == 0 || len(ev.Asks) == 0 {
 				continue
 			}
@@ -115,18 +197,17 @@ func connectPoly(ctx context.Context, pub *MemoryPub, wssURL, tokenID string) er
 			if bidP == "" || askP == "" {
 				continue
 			}
-			mid := midPrice(bidP, askP)
-
 			pctx, pcancel := context.WithTimeout(ctx, 500*time.Millisecond)
 			if perr := pub.Publish(pctx, StreamPoly, map[string]interface{}{
-				"src":   "polymarket",
-				"token": ev.AssetID,
-				"bid_p": bidP,
-				"bid_q": bidQ,
-				"ask_p": askP,
-				"ask_q": askQ,
-				"mid":   mid,
-				"ts":    time.Now().UnixMilli(),
+				"src":       "polymarket",
+				"token":     ev.AssetID,
+				"bid_p":     bidP,
+				"bid_q":     bidQ,
+				"ask_p":     askP,
+				"ask_q":     askQ,
+				"mid":       midPrice(bidP, askP), // Up olasiligi (0..1)
+				"window_ts": winTS,
+				"ts":        time.Now().UnixMilli(),
 			}); perr != nil && ctx.Err() == nil {
 				log.Printf("[POLY] publish hatasi: %v", perr)
 			}
@@ -135,7 +216,6 @@ func connectPoly(ctx context.Context, pub *MemoryPub, wssURL, tokenID string) er
 	}
 }
 
-// parsePolyEvents: mesaji event dizisi (tercih) veya tek event olarak cozer.
 func parsePolyEvents(msg []byte) []polyBookEvent {
 	var arr []polyBookEvent
 	if err := json.Unmarshal(msg, &arr); err == nil {
@@ -148,7 +228,7 @@ func parsePolyEvents(msg []byte) []polyBookEvent {
 	return nil
 }
 
-// bestLevel: bid icin en yuksek fiyat, ask icin en dusuk fiyat (fiyat, miktar).
+// bestLevel: bid icin en yuksek, ask icin en dusuk fiyat (fiyat, miktar).
 func bestLevel(levels []polyLevel, wantMax bool) (string, string) {
 	bestP, bestQ := "", ""
 	var bestF float64
