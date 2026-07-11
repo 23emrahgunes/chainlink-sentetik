@@ -21,10 +21,12 @@ import urllib.request
 log = logging.getLogger("brain.p2b")
 
 WINDOW_SEC = 300
-# time + openPrice + closePrice birlikte (kapanmis/aktif tum pencereler)
-_RX = re.compile(
+# Aktif pencere: state.data icinde, Time oneki YOK -> "openPrice":X,"closePrice":null
+_RX_ACTIVE = re.compile(r'"openPrice":([0-9.]+),"closePrice":null')
+# Kapanmis pencereler: Time + openPrice + closePrice(sayi)
+_RX_CLOSED = re.compile(
     r'Time":"(20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d)[^"]*",'
-    r'"openPrice":([0-9.]+),"closePrice":(null|[0-9.]+)'
+    r'"openPrice":([0-9.]+),"closePrice":([0-9.]+)'
 )
 
 
@@ -43,18 +45,15 @@ class PriceToBeatFeed:
         html = urllib.request.urlopen(req, timeout=10).read().decode("utf-8", "ignore")
         html = html.replace(chr(92), "")  # escaped JSON (\" -> ")
 
-        active = 0.0
+        # Aktif pencere openPrice (Price to Beat) — closePrice:null, Time oneki yok.
+        am = _RX_ACTIVE.search(html)
+        active = float(am.group(1)) if am else 0.0
+
+        # Kapanmis pencereler (settlement icin).
         closed: dict[int, tuple] = {}
-        for t, o, c in _RX.findall(html):
+        for t, o, c in _RX_CLOSED.findall(html):
             ts = calendar.timegm(time.strptime(t, "%Y-%m-%dT%H:%M:%S"))
-            op = float(o)
-            if c == "null":
-                if ts == win_ts:
-                    active = op
-            else:
-                closed[ts] = (op, float(c))
-        if active == 0.0 and win_ts in closed:
-            active = closed[win_ts][0]
+            closed[ts] = (float(o), float(c))
         return active, closed
 
     async def run(self, stop) -> None:

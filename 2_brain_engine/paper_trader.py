@@ -17,6 +17,8 @@ import logging
 
 log = logging.getLogger("brain.paper")
 
+WINDOW_SEC = 300  # kapanmis pencereler END zamaniyla anahtarli (start+300)
+
 
 class PaperTrader:
     def __init__(self, stake: float = 1.0, lock_after_sec: int = 60) -> None:
@@ -63,10 +65,11 @@ class PaperTrader:
         still = []
         for tr in self.pending:
             w = tr["win"]
-            if w not in closed:
+            w_end = w + WINDOW_SEC          # kapanis END zamaniyla anahtarli
+            if w_end not in closed:
                 still.append(tr)  # sonuc henuz yok, bekle
                 continue
-            o, c = closed[w]
+            o, c = closed[w_end]
             outcome = "LONG" if c >= o else "SHORT"
             p = tr["entry_price"]
             won = (tr["dir"] == outcome)
