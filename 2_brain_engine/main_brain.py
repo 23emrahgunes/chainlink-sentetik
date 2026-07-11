@@ -52,7 +52,7 @@ async def run(stop: asyncio.Event) -> None:
     password = os.getenv("REDIS_PASSWORD", "")
     fixed_strike = float(os.getenv("PRICE_TO_BEAT", "0"))     # >0 ise sabit; 0 ise dinamik pencere
     window_sec = int(os.getenv("UPDOWN_WINDOW_SEC", "300"))   # 5dk = 300
-    move_band = float(os.getenv("SIGNAL_MOVE_BAND", "0.0001"))  # acilis etrafinda olu bolge (%0.01)
+    move_band = float(os.getenv("SIGNAL_MOVE_BAND", "0.00005"))  # olu bolge (~%0.005 = $3)
     signal_cooldown_ms = float(os.getenv("SIGNAL_COOLDOWN_MS", "2000"))
     quote_ttl_ms = float(os.getenv("QUOTE_TTL_MS", "4000"))  # borsa "taze" sayilma penceresi
     # USD-spot borsalar: Chainlink/Polymarket referansina en yakin (perp primi yok).
@@ -81,6 +81,8 @@ async def run(stop: asyncio.Event) -> None:
     last_synth_pub = 0.0
     last_dir = ""          # sinyal spam onleme: son yon
     last_emit_ms = 0.0     # son sinyal zamani
+    cur_win = -1           # aktif 5dk pencere indeksi
+    spot_open = 0.0        # pencere acilisinda bizim spot fiyat (tutarli hareket referansi)
 
     stream = consumer.stream()
     try:
@@ -128,17 +130,24 @@ async def run(stop: asyncio.Event) -> None:
             else:
                 spot_ref = p_cex   # spot yoksa sentetige dus
 
-            # --- PRICE TO BEAT: Polymarket aktif pencere openPrice'i (birebir) ---
-            # p2b feed rollover'da yeni degeri ceker -> "hemen guncelle". Yoksa spot fallback.
+            # --- PENCERE: her 5dk basinda kendi spot acilisimizi yakala (tutarli hareket) ---
+            win = int(now_ms // 1000 // window_sec)
+            if win != cur_win:
+                cur_win = win
+                spot_open = spot_ref
+                log.info("[PENCERE] yeni %ddk -> spot-acilis=%.2f | Polymarket P2B=%.2f",
+                         window_sec // 60, spot_open, p2b.price)
+
+            # --- PRICE TO BEAT (gosterim): Polymarket openPrice (yoksa kendi spot acilis) ---
             if fixed_strike > 0:
                 strike = fixed_strike
             elif p2b.price > 0:
-                strike = p2b.price          # Polymarket'in Price to Beat'i (birebir)
+                strike = p2b.price          # Polymarket'in birebir Price to Beat'i
             else:
-                strike = spot_ref           # feed hazir degilse spot fallback
+                strike = spot_open
 
-            # --- YON: spot referans acilisa gore yukari/asagi (market'in cozdugu sey) ---
-            move = (spot_ref - strike) / strike if strike > 0 else 0.0
+            # --- YON/HAREKET: KENDI spot acilisimiza gore (kaynak-tutarli, baz yok) ---
+            move = (spot_ref - spot_open) / spot_open if spot_open > 0 else 0.0
             cand_dir = "LONG" if move >= 0 else "SHORT"   # LONG=Up, SHORT=Down
 
             # Polymarket Up olasiligi (taze degilse -1 = veri yok)
