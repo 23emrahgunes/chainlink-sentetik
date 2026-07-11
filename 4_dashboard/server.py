@@ -35,6 +35,7 @@ HERE = Path(__file__).parent
 STREAMS = {
     "stream:synthetic": "synthetic",
     "stream:polymarket": "poly",
+    "stream:pnl": "pnl",
     "stream:signals": "signal",
     "stream:executions": "execution",
     "stream:cex_l2": "cex",

@@ -20,6 +20,7 @@ import time
 import numpy as np
 from dotenv import load_dotenv
 
+from paper_trader import PaperTrader
 from polymarket_feed import PolyFeed
 from pricetobeat_feed import PriceToBeatFeed
 from redis_consumer import RedisConsumer
@@ -75,6 +76,10 @@ async def run(stop: asyncio.Event) -> None:
     # Price to Beat: Polymarket'in aktif pencere openPrice'i (birebir kaynak).
     p2b = PriceToBeatFeed()
     p2b_task = asyncio.ensure_future(p2b.run(stop))
+    # Kagit-ustu trader (DRY_RUN, $1): momentum + Polymarket teyidi.
+    trader = PaperTrader(stake=float(os.getenv("PAPER_STAKE", "1.0")),
+                         lock_after_sec=int(os.getenv("PAPER_LOCK_AFTER_SEC", "60")))
+    last_pnl_pub = 0.0
 
     # 5 borsanin en son kotasyonu (src -> quote). Sentetik kuresel fiyat icin.
     quotes: dict[str, dict] = {}
@@ -175,6 +180,18 @@ async def run(stop: asyncio.Event) -> None:
                 emitted = await emit(cand_dir, spot_ref, strike, poly_up, move,
                                      consumer.client)
                 last_dir, last_emit_ms = emitted, now_ms
+
+            # --- Kagit-ustu trade + PnL (momentum + Polymarket teyidi) ---
+            win_ts = win * window_sec
+            now_sec = int(now_ms // 1000)
+            trader.update(win_ts, now_sec, cand_dir, poly_up, spot_open, p2b.closed)
+            if now_ms - last_pnl_pub >= 1000:
+                last_pnl_pub = now_ms
+                try:
+                    await consumer.client.xadd("stream:pnl", trader.snapshot(),
+                                               maxlen=10, approximate=True)
+                except Exception as exc:
+                    log.error("[PNL] xadd hatasi: %s", exc)
     finally:
         poly_task.cancel()
         p2b_task.cancel()

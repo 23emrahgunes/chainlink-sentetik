@@ -165,6 +165,57 @@
     </section>
   </div>
 
+  <!-- PAPER TRADE / NET PnL (DRY_RUN, $1 stake · momentum + Polymarket teyidi) -->
+  <section class="card rounded-xl border border-slate-800 p-5 mt-6 shadow-xl">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm uppercase tracking-widest text-slate-400">
+        Kağıt Trade · Net PnL <span class="text-slate-600 normal-case tracking-normal">($1 · DRY_RUN)</span>
+      </h2>
+      <span class="text-[11px] px-2 py-0.5 rounded"
+            :class="paperOpen ? 'bg-amber-500/15 text-amber-300' : 'bg-slate-700/40 text-slate-500'"
+            x-text="paperOpen ? 'AÇIK POZİSYON' : 'pozisyon yok'"></span>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
+      <div>
+        <p class="text-[11px] uppercase tracking-widest text-slate-500">Net PnL</p>
+        <p class="text-2xl sm:text-3xl font-bold tabular-nums glow"
+           :class="pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'"
+           x-text="(pnl >= 0 ? '+' : '') + '$' + Number(pnl).toFixed(3)"></p>
+      </div>
+      <div>
+        <p class="text-[11px] uppercase tracking-widest text-slate-500">İşlem</p>
+        <p class="text-2xl font-bold tabular-nums text-slate-200" x-text="trades"></p>
+      </div>
+      <div>
+        <p class="text-[11px] uppercase tracking-widest text-slate-500">İsabet</p>
+        <p class="text-2xl font-bold tabular-nums text-sky-300" x-text="winRate + '%'"></p>
+      </div>
+      <div>
+        <p class="text-[11px] uppercase tracking-widest text-slate-500">Kazanan/Kaybeden</p>
+        <p class="text-2xl font-bold tabular-nums">
+          <span class="text-emerald-400" x-text="wins"></span><span class="text-slate-600">/</span><span class="text-rose-400" x-text="losses"></span>
+        </p>
+      </div>
+      <div class="col-span-2">
+        <p class="text-[11px] uppercase tracking-widest text-slate-500">Son Sonuç</p>
+        <p class="text-sm font-semibold mt-1" x-show="lastResult">
+          <span :class="lastDir === 'LONG' ? 'text-emerald-400' : 'text-rose-400'"
+                x-text="lastDir === 'LONG' ? '▲ UP' : '▼ DOWN'"></span>
+          <span class="text-slate-500">tahmin →</span>
+          <span :class="lastOutcome === 'LONG' ? 'text-emerald-400' : 'text-rose-400'"
+                x-text="lastOutcome === 'LONG' ? 'UP' : 'DOWN'"></span>
+          <span class="ml-1" :class="lastWon ? 'text-emerald-400' : 'text-rose-400'"
+                x-text="(lastWon ? 'KAZANDI ' : 'KAYBETTI ') + (lastProfit >= 0 ? '+' : '') + '$' + Number(lastProfit).toFixed(3)"></span>
+        </p>
+        <p class="text-sm text-slate-600 mt-1" x-show="!lastResult">henüz sonuçlanan işlem yok</p>
+      </div>
+    </div>
+    <p class="mt-4 text-[11px] text-slate-600">
+      Her 5dk pencerede $1 ile: momentum yönümüz Polymarket oranıyla aynıysa işlem açılır,
+      pencere kapanınca Polymarket open/close (Chainlink) ile teyit edilir. Gerçek emir yok.
+    </p>
+  </section>
+
   <script>
     function ghost() {
       return {
@@ -182,6 +233,8 @@
         polyPrice: null,      // Polymarket YES olasiligi (0..1)
         lastKarar: null,      // son execution karari (ONAYLI/RED)
         lastKararDir: '',     // son karar yonu (LONG/SHORT)
+        pnl: 0, trades: 0, wins: 0, losses: 0, winRate: 0, paperOpen: false,
+        lastResult: false, lastDir: '', lastOutcome: '', lastWon: false, lastProfit: 0,
         _prices: [],          // sparkline icin son ~60 mid nokta
         _rowId: 0,
         _msgCount: 0,
@@ -220,6 +273,23 @@
           if (msg.type === 'poly') {              // Polymarket YES fiyati (0..1)
             const m = Number(d.mid);
             if (m > 0) this.polyPrice = m;
+            return;
+          }
+
+          if (msg.type === 'pnl') {               // kagit trade / net PnL
+            this.pnl = Number(d.pnl);
+            this.trades = Number(d.trades);
+            this.wins = Number(d.wins);
+            this.losses = Number(d.losses);
+            this.winRate = Number(d.win_rate);
+            this.paperOpen = d.open === '1';
+            if (d.last_dir) {
+              this.lastResult = true;
+              this.lastDir = d.last_dir;
+              this.lastOutcome = d.last_outcome;
+              this.lastWon = d.last_won === '1';
+              this.lastProfit = Number(d.last_profit);
+            }
             return;
           }
 
