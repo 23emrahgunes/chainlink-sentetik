@@ -175,6 +175,27 @@
             :class="paperOpen ? 'bg-amber-500/15 text-amber-300' : 'bg-slate-700/40 text-slate-500'"
             x-text="paperOpen ? 'AÇIK POZİSYON' : 'pozisyon yok'"></span>
     </div>
+
+    <!-- OBI: 5 borsa derinlik baskısı (tahmini süren sinyal) -->
+    <div class="mb-5">
+      <div class="flex justify-between items-baseline text-[11px] mb-1">
+        <span class="text-rose-400">◄ SATIŞ baskısı</span>
+        <span class="text-slate-400">Derinlik OBI:
+          <span class="font-bold tabular-nums"
+                :class="obi > 0.05 ? 'text-emerald-400' : obi < -0.05 ? 'text-rose-400' : 'text-slate-300'"
+                x-text="(obi >= 0 ? '+' : '') + obi.toFixed(3)"></span>
+        </span>
+        <span class="text-emerald-400">ALIŞ baskısı ►</span>
+      </div>
+      <div class="relative h-3 bg-slate-800/70 rounded-full overflow-hidden">
+        <div class="absolute left-1/2 top-0 bottom-0 w-px bg-slate-500 z-10"></div>
+        <div class="absolute top-0 bottom-0 transition-all duration-300"
+             :class="obi >= 0 ? 'bg-emerald-500/70' : 'bg-rose-500/70'"
+             :style="obi >= 0
+                ? ('left:50%; width:' + Math.min(Math.abs(obi)*50,50) + '%')
+                : ('right:50%; width:' + Math.min(Math.abs(obi)*50,50) + '%')"></div>
+      </div>
+    </div>
     <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
       <div>
         <p class="text-[11px] uppercase tracking-widest text-slate-500">Net PnL</p>
@@ -211,9 +232,10 @@
       </div>
     </div>
     <p class="mt-4 text-[11px] text-slate-600">
-      LATENCY-ARB ($1, DRY_RUN): Pencere kapanışına ~30s kala, hızlı spotumuz price-to-beat'in
-      belirgin (net) üstünde/altındaysa VE Polymarket o kesinliği hâlâ ucuz fiyatlıyorsa (≤0.90)
-      işlem açılır. Kapanışta Polymarket open/close (Chainlink) ile teyit. Gerçek emir yok.
+      OBI-SÜRÜCÜLÜ ($1, DRY_RUN): 5 borsanın order book DERİNLİĞİNDEki alım/satış baskısı (OBI)
+      eşiği aşınca — fiyat kırılmadan ÖNCE — yön tahmini yapılır (OBI>0 → UP). Polymarket o yönü
+      hâlâ ucuz fiyatlıyorsa (≤0.90) girilir. Pencere kapanışında Polymarket open/close (Chainlink)
+      ile teyit. Gerçek emir yok.
     </p>
   </section>
 
@@ -283,6 +305,7 @@
         spotRef: null,        // piyasa spot referansi (Coinbase/Kraken USD)
         synthSources: 0,      // taze borsa sayisi
         strike: null,         // price to beat (hedef)
+        obi: 0,               // order book imbalance (-1..+1, derinlik baskisi)
         polyPrice: null,      // Polymarket YES olasiligi (0..1)
         lastKarar: null,      // son execution karari (ONAYLI/RED)
         lastKararDir: '',     // son karar yonu (LONG/SHORT)
@@ -322,6 +345,7 @@
             if (d.spot_ref) this.spotRef = Number(d.spot_ref).toFixed(2);
             this.synthSources = Number(d.sources) || 0;
             if (d.strike && Number(d.strike) > 0) this.strike = Number(d.strike).toFixed(2);
+            if (d.obi !== undefined) this.obi = Number(d.obi);
             return;
           }
           if (msg.type === 'poly') {              // Polymarket YES fiyati (0..1)

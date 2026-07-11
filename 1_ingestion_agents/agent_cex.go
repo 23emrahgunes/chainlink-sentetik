@@ -35,6 +35,7 @@ func BinanceAdapter(url string) CEXAdapter {
 				Src:  "binance",
 				BidP: d.Bids[0][0], BidQ: d.Bids[0][1],
 				AskP: d.Asks[0][0], AskQ: d.Asks[0][1],
+				BidVol: sumLevels(d.Bids), AskVol: sumLevels(d.Asks), // 20 seviye derinlik
 			}, true
 		},
 	}

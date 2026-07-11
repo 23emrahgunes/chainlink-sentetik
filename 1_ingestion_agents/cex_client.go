@@ -7,19 +7,35 @@ package main
 import (
 	"context"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-// TopOfBook: tum borsalar icin normalize edilmis en iyi bid/ask (string fiyat/miktar).
+// sumLevels: [ [price, size], ... ] dizisindeki tum size'lari toplar (derinlik hacmi).
+func sumLevels(levels [][]string) string {
+	var total float64
+	for _, lv := range levels {
+		if len(lv) >= 2 {
+			if v, err := strconv.ParseFloat(lv[1], 64); err == nil {
+				total += v
+			}
+		}
+	}
+	return strconv.FormatFloat(total, 'f', -1, 64)
+}
+
+// TopOfBook: en iyi bid/ask + DERINLIK toplam hacmi (OBI icin).
 type TopOfBook struct {
-	Src  string
-	BidP string
-	BidQ string
-	AskP string
-	AskQ string
+	Src    string
+	BidP   string
+	BidQ   string
+	AskP   string
+	AskQ   string
+	BidVol string // tum bid seviyelerinin toplam hacmi (derinlik)
+	AskVol string // tum ask seviyelerinin toplam hacmi (derinlik)
 }
 
 // CEXAdapter: bir borsanin WSS baglanti tanimi.
@@ -117,13 +133,22 @@ func connectCEX(ctx context.Context, pub *MemoryPub, a CEXAdapter) error {
 			continue // heartbeat / ack / tek-tarafli delta — atla
 		}
 		pctx, pcancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		bidVol, askVol := tob.BidVol, tob.AskVol
+		if bidVol == "" {
+			bidVol = tob.BidQ // derinlik yoksa top seviye
+		}
+		if askVol == "" {
+			askVol = tob.AskQ
+		}
 		if perr := pub.Publish(pctx, StreamCEX, map[string]interface{}{
-			"src":   tob.Src,
-			"bid_p": tob.BidP,
-			"bid_q": tob.BidQ,
-			"ask_p": tob.AskP,
-			"ask_q": tob.AskQ,
-			"ts":    time.Now().UnixMilli(),
+			"src":     tob.Src,
+			"bid_p":   tob.BidP,
+			"bid_q":   tob.BidQ,
+			"ask_p":   tob.AskP,
+			"ask_q":   tob.AskQ,
+			"bid_vol": bidVol,
+			"ask_vol": askVol,
+			"ts":      time.Now().UnixMilli(),
 		}); perr != nil && ctx.Err() == nil {
 			log.Printf("[%s] publish hatasi: %v", a.Name, perr)
 		}

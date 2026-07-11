@@ -21,12 +21,11 @@ WINDOW_SEC = 300  # kapanmis pencereler END zamaniyla anahtarli (start+300)
 
 
 class PaperTrader:
-    def __init__(self, stake: float = 1.0, lock_before_close: int = 30,
-                 min_move: float = 0.0003, value_max: float = 0.90) -> None:
+    def __init__(self, stake: float = 1.0, obi_entry: float = 0.25,
+                 value_max: float = 0.90) -> None:
         self.stake = stake
-        self.lock_before_close = lock_before_close  # kapanisa kac sn kala karar
-        self.min_move = min_move                    # net hareket esigi (baz gurultusunu asmali)
-        self.value_max = value_max                  # oran bu ustundeyse edge yok (pahali)
+        self.obi_entry = obi_entry    # |OBI| bu esigi asinca yon tahmini (derinlik baskisi)
+        self.value_max = value_max    # Polymarket orani bu ustundeyse zaten fiyatlamis (pahali)
         self.pnl = 0.0
         self.trades = 0
         self.wins = 0
@@ -36,8 +35,8 @@ class PaperTrader:
         self.last: dict | None = None         # son settle sonucu (gosterim)
         self._to_publish: list[dict] = []     # yeni settle edilenler (stream:trades icin)
 
-    def update(self, win_ts: int, now_sec: int, spot_ref: float,
-               strike: float, poly_up: float, closed: dict) -> None:
+    def update(self, win_ts: int, now_sec: int, obi: float,
+               poly_up: float, closed: dict) -> None:
         # 1) settle: sonucu hazir olan bekleyen islemler
         self._settle_pending(closed)
 
@@ -49,27 +48,23 @@ class PaperTrader:
             self.open_trade = {"win": win_ts, "dir": None,
                                "entry_price": 0.0, "locked": False}
 
-        # 3) LATENCY-ARB: pencere KAPANISINA lock_before_close kala karar
+        # 3) OBI-SURUCULU: derinlik baskisi (|OBI|) esigi asinca yon tahmini.
+        #    Fiyat kirilmadan ONCE sez -> Polymarket henuz fiyatlamadiysa ucuz gir.
         slot = self.open_trade
-        if not slot["locked"] and (now_sec - win_ts) >= (WINDOW_SEC - self.lock_before_close):
-            slot["locked"] = True
-            if strike > 0 and spot_ref > 0 and poly_up is not None and poly_up >= 0:
-                move = (spot_ref - strike) / strike
-                direction = "LONG" if move >= 0 else "SHORT"   # kapanisa yakin ~belli
+        if not slot["locked"] and abs(obi) >= self.obi_entry:
+            if poly_up is not None and poly_up >= 0:
+                slot["locked"] = True
+                direction = "LONG" if obi > 0 else "SHORT"   # OBI>0 alim baskisi -> UP
                 price = poly_up if direction == "LONG" else (1.0 - poly_up)
-                # net hareket (baz gurultusunu asan) + oran hala ucuz (edge) ise ac
-                if abs(move) >= self.min_move and 0.0 < price <= self.value_max:
+                if 0.0 < price <= self.value_max:
                     slot["dir"] = direction
                     slot["entry_price"] = price
-                    log.info("[PAPER] ARB GIRIS %s @ %.3f | move=%+.4f%% (spot %.2f vs beat %.2f)",
-                             "UP" if direction == "LONG" else "DOWN",
-                             price, move * 100, spot_ref, strike)
+                    log.info("[PAPER] OBI GIRIS %s @ %.3f (OBI=%+.3f, pencere %d)",
+                             "UP" if direction == "LONG" else "DOWN", price, obi, win_ts)
                 else:
                     slot["dir"] = "PAS"
-                    log.info("[PAPER] PAS: move=%+.4f%% price=%.3f (esik move>=%.4f%%, price<=%.2f)",
-                             move * 100, price, self.min_move * 100, self.value_max)
-            else:
-                slot["dir"] = "PAS"
+                    log.info("[PAPER] PAS: OBI=%+.3f ama oran %.3f zaten pahali (>%.2f)",
+                             obi, price, self.value_max)
 
     def _settle_pending(self, closed: dict) -> None:
         still = []

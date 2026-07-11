@@ -20,6 +20,7 @@ import time
 import numpy as np
 from dotenv import load_dotenv
 
+from obi_matrix import compute_obi
 from paper_trader import PaperTrader
 from polymarket_feed import PolyFeed
 from pricetobeat_feed import PriceToBeatFeed
@@ -56,6 +57,8 @@ async def run(stop: asyncio.Event) -> None:
     move_band = float(os.getenv("SIGNAL_MOVE_BAND", "0.00005"))  # olu bolge (~%0.005 = $3)
     signal_cooldown_ms = float(os.getenv("SIGNAL_COOLDOWN_MS", "2000"))
     quote_ttl_ms = float(os.getenv("QUOTE_TTL_MS", "4000"))  # borsa "taze" sayilma penceresi
+    obi_alpha = float(os.getenv("OBI_EMA_ALPHA", "0.2"))     # OBI yumusatma (0..1)
+    obi_entry = float(os.getenv("OBI_ENTRY", "0.25"))        # |OBI| bu esigi asinca tahmin
     # USD-spot borsalar: Chainlink/Polymarket referansina en yakin (perp primi yok).
     spot_sources = set(os.getenv("SPOT_SOURCES", "coinbase,kraken").split(","))
 
@@ -76,12 +79,12 @@ async def run(stop: asyncio.Event) -> None:
     # Price to Beat: Polymarket'in aktif pencere openPrice'i (birebir kaynak).
     p2b = PriceToBeatFeed()
     p2b_task = asyncio.ensure_future(p2b.run(stop))
-    # Kagit-ustu trader (DRY_RUN, $1): LATENCY-ARB (kapanisa yakin, net hareket + ucuz oran).
+    # Kagit-ustu trader (DRY_RUN, $1): OBI-suruculu — derinlik baskisini sezip
+    # fiyat kirilmadan once yon tahmini.
     trader = PaperTrader(
         stake=float(os.getenv("PAPER_STAKE", "1.0")),
-        lock_before_close=int(os.getenv("PAPER_LOCK_BEFORE_CLOSE_SEC", "30")),
-        min_move=float(os.getenv("LATENCY_MIN_MOVE", "0.0003")),
-        value_max=float(os.getenv("LATENCY_VALUE_MAX", "0.90")))
+        obi_entry=obi_entry,
+        value_max=float(os.getenv("OBI_VALUE_MAX", "0.90")))
     last_pnl_pub = 0.0
 
     # 5 borsanin en son kotasyonu (src -> quote). Sentetik kuresel fiyat icin.
@@ -89,6 +92,7 @@ async def run(stop: asyncio.Event) -> None:
     last_synth_pub = 0.0
     last_dir = ""          # sinyal spam onleme: son yon
     last_emit_ms = 0.0     # son sinyal zamani
+    obi_ema = 0.0          # yumusatilmis OBI (order book imbalance)
     cur_win = -1           # aktif 5dk pencere indeksi
     spot_open = 0.0        # pencere acilisinda bizim spot fiyat (tutarli hareket referansi)
 
@@ -111,13 +115,17 @@ async def run(stop: asyncio.Event) -> None:
             except StopAsyncIteration:
                 break
 
-            # --- Bu borsanin son kotasyonunu kaydet ---
+            # --- Bu borsanin son kotasyonunu + DERINLIK hacmini kaydet ---
             src = field.get("src", "?")
             bid_p, bid_q = _f(field, "bid_p"), _f(field, "bid_q")
             ask_p, ask_q = _f(field, "ask_p"), _f(field, "ask_q")
+            # derinlik hacmi (tum seviyeler); yoksa top seviyeye dus
+            bid_vol = _f(field, "bid_vol") or bid_q
+            ask_vol = _f(field, "ask_vol") or ask_q
             now_ms = time.time() * 1000.0
             quotes[src] = {"bid_p": bid_p, "bid_q": bid_q,
-                           "ask_p": ask_p, "ask_q": ask_q, "ts": now_ms}
+                           "ask_p": ask_p, "ask_q": ask_q,
+                           "bid_vol": bid_vol, "ask_vol": ask_vol, "ts": now_ms}
 
             # --- SENTETIK KURESEL FIYAT: 5 borsanin TAZE kotasyonlari (hacim-agirlikli) ---
             # Diziler <=10 elemanlik veri toplamadir; asil hesap (VWAP) NumPy C-level.
@@ -126,6 +134,13 @@ async def run(stop: asyncio.Event) -> None:
             vols = np.array([x for q in fresh for x in (q["bid_q"], q["ask_q"])], dtype=np.float64)
             p_cex = compute_pcex(prices, vols)      # 5 borsa sentetik (perp dahil)
             n_src = len(fresh)
+
+            # --- OBI (Order Book Imbalance): 5 borsanin DERINLIK hacmi -> yon baskisi ---
+            # +1 = alim baskisi (fiyat yukari egilimli), -1 = satis baskisi.
+            bid_vols = np.array([q["bid_vol"] for q in fresh], dtype=np.float64)
+            ask_vols = np.array([q["ask_vol"] for q in fresh], dtype=np.float64)
+            obi = compute_obi(bid_vols, ask_vols)
+            obi_ema = obi_alpha * obi + (1.0 - obi_alpha) * obi_ema  # yumusatma (gurultu ↓)
 
             # --- PIYASA REFERANSI (spot): sadece USD-spot borsalar (Coinbase/Kraken) ---
             # Chainlink/Polymarket'in kullandigi spot fiyata en yakin; perp primi yok.
@@ -171,7 +186,7 @@ async def run(stop: asyncio.Event) -> None:
                         "stream:synthetic",
                         {"p_cex": f"{p_cex:.4f}", "spot_ref": f"{spot_ref:.4f}",
                          "sources": str(n_src), "strike": f"{strike:.2f}",
-                         "ts": str(int(now_ms))},
+                         "obi": f"{obi_ema:.4f}", "ts": str(int(now_ms))},
                         maxlen=10, approximate=True,
                     )
                 except Exception as exc:
@@ -187,7 +202,7 @@ async def run(stop: asyncio.Event) -> None:
             # --- Kagit-ustu trade + PnL (momentum + Polymarket teyidi) ---
             win_ts = win * window_sec
             now_sec = int(now_ms // 1000)
-            trader.update(win_ts, now_sec, spot_ref, strike, poly_up, p2b.closed)
+            trader.update(win_ts, now_sec, obi_ema, poly_up, p2b.closed)
             # Settle edilen islemleri gecmis tablosu icin yayinla.
             for rec in trader.drain():
                 try:
