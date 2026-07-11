@@ -30,21 +30,34 @@
     </div>
   </header>
 
-  <!-- SENTETIK KURESEL FIYAT (P_cex) — 5 borsa hacim-agirlikli -->
-  <section class="card rounded-xl border border-emerald-800/50 p-5 mb-6 shadow-xl">
-    <div class="flex items-center justify-between flex-wrap gap-2">
-      <div>
-        <p class="text-xs uppercase tracking-[0.3em] text-emerald-500/80">Sentetik Küresel BTC Fiyatı · P_cex</p>
-        <p class="text-4xl sm:text-5xl font-bold tabular-nums text-emerald-400 glow mt-1">
-          <span x-text="synthPrice ? '$' + synthPrice : '—'"></span>
-        </p>
-      </div>
-      <div class="text-right">
-        <p class="text-xs uppercase tracking-widest text-slate-500">Aktif Borsa</p>
-        <p class="text-3xl font-bold tabular-nums text-slate-200"
-           x-text="(synthSources || 0) + '/5'"></p>
-        <p class="text-[11px] text-slate-600 mt-1">hacim-ağırlıklı VWAP</p>
-      </div>
+  <!-- FIYAT PANELI: Sentetik BTC · Price to Beat · Polymarket · Aktif Borsa -->
+  <section class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div class="card rounded-xl border border-emerald-800/50 p-4 shadow-xl">
+      <p class="text-[11px] uppercase tracking-[0.2em] text-emerald-500/80">Sentetik BTC · P_cex</p>
+      <p class="text-2xl sm:text-3xl font-bold tabular-nums text-emerald-400 glow mt-1"
+         x-text="synthPrice ? '$' + synthPrice : '—'"></p>
+      <p class="text-[11px] text-slate-600 mt-1">5 borsa hacim-ağırlıklı</p>
+    </div>
+    <div class="card rounded-xl border border-amber-800/40 p-4 shadow-xl">
+      <p class="text-[11px] uppercase tracking-[0.2em] text-amber-500/80">Price to Beat</p>
+      <p class="text-2xl sm:text-3xl font-bold tabular-nums text-amber-400 mt-1"
+         x-text="strike ? '$' + strike : '—'"></p>
+      <p class="text-[11px] mt-1"
+         :class="strike && synthPrice ? (Number(synthPrice) >= Number(strike) ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-600'"
+         x-text="strike && synthPrice ? (Number(synthPrice) >= Number(strike) ? '▲ hedefin ÜSTÜNDE' : '▼ hedefin ALTINDA') : 'hedef ayarsız'"></p>
+    </div>
+    <div class="card rounded-xl border border-sky-800/40 p-4 shadow-xl">
+      <p class="text-[11px] uppercase tracking-[0.2em] text-sky-500/80">Polymarket YES</p>
+      <p class="text-2xl sm:text-3xl font-bold tabular-nums text-sky-400 mt-1"
+         x-text="polyPrice !== null ? (polyPrice * 100).toFixed(1) + '%' : '—'"></p>
+      <p class="text-[11px] text-slate-600 mt-1"
+         x-text="polyPrice !== null ? 'olasılık (0..1)' : 'TOKEN_ID gerekli'"></p>
+    </div>
+    <div class="card rounded-xl border border-slate-800 p-4 shadow-xl">
+      <p class="text-[11px] uppercase tracking-[0.2em] text-slate-500">Aktif Borsa</p>
+      <p class="text-2xl sm:text-3xl font-bold tabular-nums text-slate-200 mt-1"
+         x-text="(synthSources || 0) + '/5'"></p>
+      <p class="text-[11px] text-slate-600 mt-1">canlı besleme</p>
     </div>
   </section>
 
@@ -162,6 +175,8 @@
         msgRate: 0,
         synthPrice: null,     // sentetik kuresel P_cex (5 borsa VWAP)
         synthSources: 0,      // taze borsa sayisi
+        strike: null,         // price to beat (hedef)
+        polyPrice: null,      // Polymarket YES olasiligi (0..1)
         lastKarar: null,      // son execution karari (ONAYLI/RED)
         lastKararDir: '',     // son karar yonu (LONG/SHORT)
         _prices: [],          // sparkline icin son ~60 mid nokta
@@ -195,6 +210,12 @@
           if (msg.type === 'synthetic') {         // sentetik kuresel fiyat
             this.synthPrice = Number(d.p_cex).toFixed(2);
             this.synthSources = Number(d.sources) || 0;
+            if (d.strike && Number(d.strike) > 0) this.strike = Number(d.strike).toFixed(2);
+            return;
+          }
+          if (msg.type === 'poly') {              // Polymarket YES fiyati (0..1)
+            const m = Number(d.mid);
+            if (m > 0) this.polyPrice = m;
             return;
           }
 

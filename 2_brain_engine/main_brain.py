@@ -56,6 +56,8 @@ async def run(stop: asyncio.Event) -> None:
     # Polymarket fair-value esleme parametreleri (PLACEHOLDER model, bkz spread_model.py).
     pm_base = float(os.getenv("PM_FAIR_BASE", "0.0"))
     pm_scale = float(os.getenv("PM_FAIR_SCALE", "0.0"))
+    strike = float(os.getenv("PRICE_TO_BEAT", "0"))          # Polymarket hedef (price to beat)
+    signal_cooldown_ms = float(os.getenv("SIGNAL_COOLDOWN_MS", "2000"))
 
     log.info("=== GHOST ORACLE v5.0 :: Analytical Brain ===")
     log.info("TRADING_MODE = %s", mode)
@@ -74,6 +76,8 @@ async def run(stop: asyncio.Event) -> None:
     # 5 borsanin en son kotasyonu (src -> quote). Sentetik kuresel fiyat icin.
     quotes: dict[str, dict] = {}
     last_synth_pub = 0.0
+    last_dir = ""          # sinyal spam onleme: son yon
+    last_emit_ms = 0.0     # son sinyal zamani
 
     stream = consumer.stream()
     try:
@@ -121,7 +125,7 @@ async def run(stop: asyncio.Event) -> None:
                     await consumer.client.xadd(
                         "stream:synthetic",
                         {"p_cex": f"{p_cex:.4f}", "sources": str(n_src),
-                         "ts": str(int(now_ms))},
+                         "strike": f"{strike:.2f}", "ts": str(int(now_ms))},
                         maxlen=10, approximate=True,
                     )
                 except Exception as exc:
@@ -140,7 +144,14 @@ async def run(stop: asyncio.Event) -> None:
             log.info("P_cex(sentetik)=%.4f [%d borsa] | OBI=%+.3f | spread=%.5f [%s]",
                      p_cex, n_src, obi, spread, spread_src)
 
-            await evaluate(p_cex, obi, spread, obi_thr, spread_thr, consumer.client)
+            # --- Sinyal spam onleme: sadece YON degisince VEYA cooldown dolunca degerlendir ---
+            cand_dir = "LONG" if obi > 0 else "SHORT"
+            if abs(obi) > obi_thr and (cand_dir != last_dir
+                                       or now_ms - last_emit_ms > signal_cooldown_ms):
+                emitted = await evaluate(p_cex, obi, spread, obi_thr, spread_thr,
+                                         consumer.client)
+                if emitted:
+                    last_dir, last_emit_ms = emitted, now_ms
     finally:
         poly_task.cancel()
         await stream.aclose()
