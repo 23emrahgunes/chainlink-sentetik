@@ -36,6 +36,7 @@ STREAMS = {
     "stream:synthetic": "synthetic",
     "stream:polymarket": "poly",
     "stream:pnl": "pnl",
+    "stream:trades": "trade",
     "stream:signals": "signal",
     "stream:executions": "execution",
     "stream:cex_l2": "cex",
@@ -126,15 +127,22 @@ async def index() -> FileResponse:
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     await manager.connect(ws)
-    # Baglanti aninda Redis durumunu bildir.
+    # Baglanti aninda Redis durumu + islem gecmisi (stream:trades) gonder.
     client = _make_client()
     try:
         redis_ok = bool(await client.ping())
     except Exception:
         redis_ok = False
+    await ws.send_json({"type": "status", "redis": redis_ok})
+    try:
+        # Gecmis islemleri en eskiden yeniye sirayla gonder (tablo dolsun).
+        rows = await client.xrange("stream:trades", count=50)
+        for _id, fields in rows:
+            await ws.send_json({"type": "trade", "data": fields})
+    except Exception:
+        pass
     finally:
         await client.aclose()
-    await ws.send_json({"type": "status", "redis": redis_ok})
 
     try:
         # Istemciden veri beklemiyoruz; baglanti acik kalsin diye dinle.

@@ -216,6 +216,58 @@
     </p>
   </section>
 
+  <!-- İŞLEM GEÇMİŞİ -->
+  <section class="card rounded-xl border border-slate-800 p-5 mt-6 shadow-xl">
+    <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-4">
+      İşlem Geçmişi <span class="text-slate-600" x-text="'(' + tradesList.length + ')'"></span>
+    </h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-slate-500 border-b border-slate-800 text-left">
+            <th class="py-2 font-medium">Market (5dk)</th>
+            <th class="py-2 font-medium">Tahmin</th>
+            <th class="py-2 font-medium text-right">Giriş (maliyet)</th>
+            <th class="py-2 font-medium">Sonuç</th>
+            <th class="py-2 font-medium">Durum</th>
+            <th class="py-2 font-medium text-right">PnL</th>
+            <th class="py-2 font-medium text-right">Net</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="t in tradesList" :key="t.win">
+            <tr class="border-b border-slate-900/60">
+              <td class="py-2 text-slate-400 tabular-nums" x-text="t.label"></td>
+              <td class="py-2 font-bold"
+                  :class="t.dir === 'LONG' ? 'text-emerald-400' : 'text-rose-400'"
+                  x-text="t.dir === 'LONG' ? '▲ UP' : '▼ DOWN'"></td>
+              <td class="py-2 text-right tabular-nums text-slate-300"
+                  x-text="(t.entry*100).toFixed(1) + '¢'"></td>
+              <td class="py-2 font-semibold"
+                  :class="t.outcome === 'LONG' ? 'text-emerald-400' : 'text-rose-400'"
+                  x-text="t.outcome === 'LONG' ? 'UP' : 'DOWN'"></td>
+              <td class="py-2">
+                <span class="px-2 py-0.5 rounded text-xs font-semibold"
+                      :class="t.won ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'"
+                      x-text="t.won ? 'KAZANDI' : 'KAYBETTI'"></span>
+              </td>
+              <td class="py-2 text-right tabular-nums font-semibold"
+                  :class="t.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'"
+                  x-text="(t.profit >= 0 ? '+' : '') + '$' + Number(t.profit).toFixed(3)"></td>
+              <td class="py-2 text-right tabular-nums text-slate-400"
+                  x-text="'$' + Number(t.pnl_after).toFixed(2)"></td>
+            </tr>
+          </template>
+          <tr x-show="tradesList.length === 0">
+            <td colspan="7" class="py-8 text-center text-slate-600">
+              Sonuçlanan işlem bekleniyor... <span class="pulse">▮</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <script>
     function ghost() {
       return {
@@ -235,6 +287,7 @@
         lastKararDir: '',     // son karar yonu (LONG/SHORT)
         pnl: 0, trades: 0, wins: 0, losses: 0, winRate: 0, paperOpen: false,
         lastResult: false, lastDir: '', lastOutcome: '', lastWon: false, lastProfit: 0,
+        tradesList: [],       // islem gecmisi
         _prices: [],          // sparkline icin son ~60 mid nokta
         _rowId: 0,
         _msgCount: 0,
@@ -273,6 +326,23 @@
           if (msg.type === 'poly') {              // Polymarket YES fiyati (0..1)
             const m = Number(d.mid);
             if (m > 0) this.polyPrice = m;
+            return;
+          }
+
+          if (msg.type === 'trade') {             // islem gecmisi satiri
+            const win = Number(d.win);
+            const s = new Date(win * 1000), e = new Date((win + 300) * 1000);
+            const hh = x => String(x).padStart(2, '0');
+            const label = `${hh(s.getHours())}:${hh(s.getMinutes())}-${hh(e.getHours())}:${hh(e.getMinutes())}`;
+            // ayni pencere zaten varsa ekleme (gecmis + canli cakismasi)
+            if (!this.tradesList.some(t => t.win === win)) {
+              this.tradesList.unshift({
+                win, label, dir: d.dir, outcome: d.outcome,
+                entry: Number(d.entry), won: d.won === '1',
+                profit: Number(d.profit), pnl_after: Number(d.pnl_after)
+              });
+              if (this.tradesList.length > 30) this.tradesList.pop();
+            }
             return;
           }
 

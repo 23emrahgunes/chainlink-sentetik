@@ -31,6 +31,7 @@ class PaperTrader:
         self.open_trade: dict | None = None   # aktif pencere slotu
         self.pending: list[dict] = []         # settle bekleyen (girilmis) islemler
         self.last: dict | None = None         # son settle sonucu (gosterim)
+        self._to_publish: list[dict] = []     # yeni settle edilenler (stream:trades icin)
 
     def update(self, win_ts: int, now_sec: int, our_dir: str,
                poly_up: float, spot_open: float, closed: dict) -> None:
@@ -78,15 +79,22 @@ class PaperTrader:
             self.trades += 1
             self.wins += 1 if won else 0
             self.losses += 0 if won else 1
-            self.last = {
+            rec = {
                 "win": w, "dir": tr["dir"], "outcome": outcome,
-                "won": won, "profit": profit, "entry": p,
+                "won": won, "profit": profit, "entry": p, "pnl_after": self.pnl,
             }
+            self.last = rec
+            self._to_publish.append(rec)
             log.info("[PAPER] SETTLE pencere %d: tahmin=%s sonuc=%s -> %s %+.3f$ | net=%.3f$",
                      w, "UP" if tr["dir"] == "LONG" else "DOWN",
                      "UP" if outcome == "LONG" else "DOWN",
                      "KAZANDI" if won else "KAYBETTI", profit, self.pnl)
         self.pending = still
+
+    def drain(self) -> list[dict]:
+        """Son update'ten bu yana settle edilen islemleri dondurur (yayin icin)."""
+        recs, self._to_publish = self._to_publish, []
+        return recs
 
     def snapshot(self) -> dict:
         wr = (self.wins / self.trades * 100.0) if self.trades else 0.0

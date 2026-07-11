@@ -185,6 +185,20 @@ async def run(stop: asyncio.Event) -> None:
             win_ts = win * window_sec
             now_sec = int(now_ms // 1000)
             trader.update(win_ts, now_sec, cand_dir, poly_up, spot_open, p2b.closed)
+            # Settle edilen islemleri gecmis tablosu icin yayinla.
+            for rec in trader.drain():
+                try:
+                    await consumer.client.xadd("stream:trades", {
+                        "win": str(rec["win"]),
+                        "dir": rec["dir"],
+                        "outcome": rec["outcome"],
+                        "won": "1" if rec["won"] else "0",
+                        "profit": f"{rec['profit']:.4f}",
+                        "entry": f"{rec['entry']:.4f}",
+                        "pnl_after": f"{rec['pnl_after']:.4f}",
+                    }, maxlen=50, approximate=True)
+                except Exception as exc:
+                    log.error("[TRADES] xadd hatasi: %s", exc)
             if now_ms - last_pnl_pub >= 1000:
                 last_pnl_pub = now_ms
                 try:
