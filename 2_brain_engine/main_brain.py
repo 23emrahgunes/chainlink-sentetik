@@ -20,6 +20,7 @@ import time
 import numpy as np
 from dotenv import load_dotenv
 
+from chainlink_feed import ChainlinkFeed
 from obi_matrix import compute_obi
 from paper_trader import PaperTrader
 from polymarket_feed import PolyFeed
@@ -85,6 +86,9 @@ async def run(stop: asyncio.Event) -> None:
     # USDT/USD kuru (Tether piyasalarini USD'ye cevirmek icin).
     usdt = UsdtUsdFeed()
     usdt_task = asyncio.ensure_future(usdt.run(stop))
+    # Polymarket RTDS: gercek canli Chainlink BTC/USD (market'in cozuldugu fiyat).
+    chainlink = ChainlinkFeed(consumer.client)
+    chainlink_task = asyncio.ensure_future(chainlink.run(stop))
     # Kagit-ustu trader (DRY_RUN, $1): OBI-suruculu — derinlik baskisini sezip
     # fiyat kirilmadan once yon tahmini.
     trader = PaperTrader(
@@ -197,7 +201,7 @@ async def run(stop: asyncio.Event) -> None:
                         {"p_cex": f"{p_cex:.4f}", "spot_ref": f"{spot_ref:.4f}",
                          "sources": str(n_src), "strike": f"{strike:.2f}",
                          "obi": f"{obi_ema:.4f}", "usdt": f"{usdt.rate:.5f}",
-                         "ts": str(int(now_ms))},
+                         "chainlink": f"{chainlink.price:.2f}", "ts": str(int(now_ms))},
                         maxlen=10, approximate=True,
                     )
                 except Exception as exc:
@@ -239,6 +243,7 @@ async def run(stop: asyncio.Event) -> None:
         poly_task.cancel()
         p2b_task.cancel()
         usdt_task.cancel()
+        chainlink_task.cancel()
         await stream.aclose()
         await consumer.close()
         log.info("[BRAIN] tuketici kapatildi. Atilan(bayat) kayit: %d",

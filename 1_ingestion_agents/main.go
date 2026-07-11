@@ -68,13 +68,14 @@ func main() {
 
 	// --- Ajanlari baslat ---
 	var wg sync.WaitGroup
-	wg.Add(len(cexAdapters) + 2) // 5 CEX + 1 DEX + 1 Polymarket
+	wg.Add(len(cexAdapters) + 3) // 5 CEX + DEX + Polymarket + Chainlink RTDS
 	for _, a := range cexAdapters {
 		go RunCEX(rootCtx, &wg, pub, a)
 	}
 	go RunDEXAgent(rootCtx, &wg, pub, dexURL)
 	go RunPolymarketAgent(rootCtx, &wg, pub, polyURL, polyToken)
-	log.Printf("[MAIN] %d CEX + DEX + Polymarket ajani calisiyor. Ctrl+C ile durdur.", len(cexAdapters))
+	go RunChainlinkRTDS(rootCtx, &wg, pub)
+	log.Printf("[MAIN] %d CEX + DEX + Polymarket + Chainlink RTDS calisiyor. Ctrl+C ile durdur.", len(cexAdapters))
 
 	// --- Graceful Shutdown ---
 	sig := make(chan os.Signal, 1)

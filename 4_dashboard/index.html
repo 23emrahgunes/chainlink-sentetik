@@ -43,8 +43,9 @@
     <div class="card rounded-xl border border-cyan-800/40 p-4 shadow-xl">
       <p class="text-[11px] uppercase tracking-[0.2em] text-cyan-500/80">Polymarket BTC · canlı</p>
       <p class="text-2xl sm:text-3xl font-bold tabular-nums text-cyan-300 mt-1"
-         x-text="spotRef ? '$' + spotRef : '—'"></p>
-      <p class="text-[11px] text-slate-600 mt-1">Coinbase/Kraken USD spot ≈ Chainlink</p>
+         x-text="chainlinkPrice ? '$' + chainlinkPrice : (spotRef ? '$' + spotRef : '—')"></p>
+      <p class="text-[11px] text-slate-600 mt-1"
+         x-text="chainlinkPrice ? 'RTDS Chainlink (birebir)' : 'spot proxy (RTDS bekleniyor)'"></p>
     </div>
     <div class="card rounded-xl border border-amber-800/40 p-4 shadow-xl">
       <p class="text-[11px] uppercase tracking-[0.2em] text-amber-500/80">Price to Beat · Polymarket</p>
@@ -307,6 +308,7 @@
         strike: null,         // price to beat (hedef)
         obi: 0,               // order book imbalance (-1..+1, derinlik baskisi)
         usdt: null,           // USDT/USD kuru
+        chainlinkPrice: null, // Polymarket RTDS gercek Chainlink BTC/USD (canli)
         polyPrice: null,      // Polymarket YES olasiligi (0..1)
         lastKarar: null,      // son execution karari (ONAYLI/RED)
         lastKararDir: '',     // son karar yonu (LONG/SHORT)
@@ -348,6 +350,7 @@
             if (d.strike && Number(d.strike) > 0) this.strike = Number(d.strike).toFixed(2);
             if (d.obi !== undefined) this.obi = Number(d.obi);
             if (d.usdt) this.usdt = Number(d.usdt).toFixed(4);
+            if (d.chainlink && Number(d.chainlink) > 0) this.chainlinkPrice = Number(d.chainlink).toFixed(2);
             return;
           }
           if (msg.type === 'poly') {              // Polymarket YES fiyati (0..1)
