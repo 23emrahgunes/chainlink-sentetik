@@ -285,10 +285,10 @@
       </div>
     </div>
     <p class="mt-4 text-[11px] text-slate-600">
-      OBI-SÜRÜCÜLÜ ($1, DRY_RUN): 5 borsanın order book DERİNLİĞİNDEki alım/satış baskısı (OBI)
-      eşiği aşınca — fiyat kırılmadan ÖNCE — yön tahmini yapılır (OBI>0 → UP). Polymarket o yönü
-      hâlâ ucuz fiyatlıyorsa (≤0.90) girilir. Pencere kapanışında Polymarket open/close (Chainlink)
-      ile teyit. Gerçek emir yok.
+      DIP STRATEJİSİ ($1, DRY_RUN): Pencere kapanışına ~30s kala, Polymarket bir yönü "kesin"
+      görüp diğerini UCUZ fiyatladıysa (≤%30) — ucuz tarafı al, **son-saniye dönüşe oyna.**
+      Örn. DOWN 8¢'e düşmüşse DOWN al: dönerse +$11.5, dönmezse −$1. Break-even dönüş = %8.
+      Gerçek dönüş oranı bundan yüksekse +EV. Kapanışta Chainlink ile teyit. Gerçek emir yok.
     </p>
   </section>
 

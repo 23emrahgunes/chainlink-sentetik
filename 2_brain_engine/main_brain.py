@@ -98,12 +98,17 @@ async def run(stop: asyncio.Event) -> None:
     dex_task = asyncio.ensure_future(dex.run(stop))
     # Kagit-ustu trader (DRY_RUN, $1): OBI-suruculu — derinlik baskisini sezip
     # fiyat kirilmadan once yon tahmini.
+    _strategy = os.getenv("PAPER_STRATEGY", "dip")  # "dip" (ucuz taraf) | "obi"
+    _lock_at = int(os.getenv("DIP_LOCK_AT_SEC", "270")) if _strategy == "dip" \
+        else int(os.getenv("SIGNAL_SAMPLE_SEC", "90"))
     trader = PaperTrader(
         stake=float(os.getenv("PAPER_STAKE", "1.0")),
+        strategy=_strategy,
         obi_entry=obi_entry,
         value_max=float(os.getenv("OBI_VALUE_MAX", "0.90")),
-        min_entry=float(os.getenv("OBI_MIN_ENTRY", "0.05")),
-        lock_at_sec=int(os.getenv("SIGNAL_SAMPLE_SEC", "90")))  # olcumle AYNI nokta
+        min_entry=float(os.getenv("OBI_MIN_ENTRY", "0.02")),
+        dip_max=float(os.getenv("DIP_MAX", "0.30")),
+        lock_at_sec=_lock_at)
     # OBI diverjans/isabet olcumu (islemsiz) — edge var mi ampirik.
     meter = SignalMeter(sample_at_sec=int(os.getenv("SIGNAL_SAMPLE_SEC", "90")),
                         strong=obi_entry)

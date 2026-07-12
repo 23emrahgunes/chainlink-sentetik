@@ -23,12 +23,15 @@ WINDOW_SEC = 300  # kapanmis pencereler END zamaniyla anahtarli (start+300)
 class PaperTrader:
     def __init__(self, stake: float = 1.0, obi_entry: float = 0.25,
                  value_max: float = 0.90, min_entry: float = 0.05,
-                 lock_at_sec: int = 90) -> None:
+                 lock_at_sec: int = 90, strategy: str = "dip",
+                 dip_max: float = 0.30) -> None:
         self.stake = stake
-        self.obi_entry = obi_entry    # |OBI| bu esigi asinca yon tahmini (derinlik baskisi)
-        self.value_max = value_max    # oran bu ustundeyse zaten fiyatlamis (pahali)
-        self.min_entry = min_entry    # oran bu altindaysa longshot/bayat (rollover artigi) -> girme
-        self.lock_at = lock_at_sec    # pencereye kac sn sonra karar (KARARLI OBI, gurultuye girme)
+        self.strategy = strategy      # "dip" (ucuz taraf, donuse oyna) | "obi" (derinlik yonu)
+        self.obi_entry = obi_entry    # obi modu: |OBI| esigi
+        self.value_max = value_max
+        self.min_entry = min_entry    # cok dusuk = bayat/degenere -> girme
+        self.dip_max = dip_max        # dip modu: ucuz taraf bu ustundeyse dip degil (market ~50/50)
+        self.lock_at = lock_at_sec    # pencereye kac sn sonra karar
         self.pnl = 0.0
         self.trades = 0
         self.wins = 0
@@ -51,26 +54,39 @@ class PaperTrader:
             self.open_trade = {"win": win_ts, "dir": None,
                                "entry_price": 0.0, "locked": False}
 
-        # 3) OBI-SURUCULU: pencereye lock_at sn sonra KARARLI OBI ile karar
-        #    (ilk crossing gurultuye giriyordu; olcum de bu noktada ornekliyor).
+        # 3) Karar: pencereye lock_at sn sonra (dip modu: kapanisa yakin).
         slot = self.open_trade
         if not slot["locked"] and (now_sec - win_ts) >= self.lock_at:
             slot["locked"] = True
-            if abs(obi) >= self.obi_entry and poly_up is not None and poly_up >= 0:
-                direction = "LONG" if obi > 0 else "SHORT"   # OBI>0 alim baskisi -> UP
-                price = poly_up if direction == "LONG" else (1.0 - poly_up)
-                # Sadece MAKUL oran araliginda gir: cok dusuk = longshot/bayat, cok yuksek = pahali.
-                if self.min_entry <= price <= self.value_max:
-                    slot["dir"] = direction
-                    slot["entry_price"] = price
-                    log.info("[PAPER] OBI GIRIS %s @ %.3f (OBI=%+.3f, pencere %d)",
-                             "UP" if direction == "LONG" else "DOWN", price, obi, win_ts)
+            if poly_up is None or poly_up < 0:
+                slot["dir"] = "PAS"          # oran yok
+            elif self.strategy == "dip":
+                # UCUZ tarafi al -> son-saniye donuse oyna (kullanicinin stratejisi)
+                up_price, down_price = poly_up, 1.0 - poly_up
+                if up_price <= down_price:
+                    direction, price = "LONG", up_price       # UP ucuz
+                else:
+                    direction, price = "SHORT", down_price     # DOWN ucuz
+                if self.min_entry <= price <= self.dip_max:    # gercekten dip mi
+                    slot["dir"], slot["entry_price"] = direction, price
+                    log.info("[PAPER] DIP GIRIS %s @ %.3f (donuse oyna, pencere %d)",
+                             "UP" if direction == "LONG" else "DOWN", price, win_ts)
                 else:
                     slot["dir"] = "PAS"
-                    log.info("[PAPER] PAS: OBI=%+.3f oran %.3f araligin disinda [%.2f, %.2f]",
-                             obi, price, self.min_entry, self.value_max)
-            else:
-                slot["dir"] = "PAS"  # OBI zayif ya da oran yok -> islem yok
+                    log.info("[PAPER] PAS: ucuz taraf %.3f dip degil [%.2f, %.2f] (market ~50/50)",
+                             price, self.min_entry, self.dip_max)
+            else:  # "obi": derinlik yonu
+                if abs(obi) >= self.obi_entry:
+                    direction = "LONG" if obi > 0 else "SHORT"
+                    price = poly_up if direction == "LONG" else (1.0 - poly_up)
+                    if self.min_entry <= price <= self.value_max:
+                        slot["dir"], slot["entry_price"] = direction, price
+                        log.info("[PAPER] OBI GIRIS %s @ %.3f (OBI=%+.3f, pencere %d)",
+                                 "UP" if direction == "LONG" else "DOWN", price, obi, win_ts)
+                    else:
+                        slot["dir"] = "PAS"
+                else:
+                    slot["dir"] = "PAS"
 
     def _settle_pending(self, closed: dict) -> None:
         still = []
