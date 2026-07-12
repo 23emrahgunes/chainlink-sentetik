@@ -1,0 +1,268 @@
+<!-- GHOST ORACLE v5.0 :: STRADDLE LAB — cift-limit olcum sayfasi (Zero-CPU).
+     Ayri sayfa; ayni /ws akisi. JS sadece WS mesajini DOM'a basar. -->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GHOST ORACLE — Straddle Lab</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>%E2%9A%96%EF%B8%8F</text></svg>" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  body { background:#0a0e14; font-family:ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace; }
+  .glow { text-shadow:0 0 8px currentColor; }
+  .pulse { animation:pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .card { background:linear-gradient(180deg,#111827,#0d131f); }
+  th, td { white-space:nowrap; }
+</style>
+
+<body class="text-slate-200 min-h-screen p-4 sm:p-8" x-data="straddle()" x-init="init()">
+  <!-- Baslik -->
+  <header class="mb-6 flex items-center justify-between flex-wrap gap-3">
+    <div>
+      <h1 class="text-2xl sm:text-3xl font-bold tracking-widest text-teal-300 glow">
+        ⚖️ STRADDLE LAB
+      </h1>
+      <p class="text-xs text-slate-500 tracking-[0.28em] uppercase">
+        Çift-limit ölçüm · işlemsiz · UP@25¢ + DOWN@25¢</p>
+    </div>
+    <div class="flex items-center gap-4 text-sm">
+      <a href="/" class="text-slate-400 hover:text-emerald-400 underline decoration-dotted">← Ana Panel</a>
+      <span class="flex items-center gap-2">
+        <span class="h-2.5 w-2.5 rounded-full pulse"
+              :class="wsOpen ? 'bg-emerald-400' : 'bg-rose-500'"></span>
+        <span x-text="wsOpen ? 'CANLI' : 'BAĞLANTI YOK'"
+              :class="wsOpen ? 'text-emerald-400' : 'text-rose-500'"></span>
+      </span>
+    </div>
+  </header>
+
+  <!-- CANLI KARTLAR -->
+  <section class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+    <div class="card rounded-xl border border-cyan-800/40 p-4">
+      <p class="text-[11px] uppercase tracking-[0.2em] text-cyan-500/80">Polymarket BTC · canlı</p>
+      <p class="text-2xl font-bold tabular-nums text-cyan-300 mt-1"
+         x-text="live.btc>0 ? '$'+fmt(live.btc,2) : '—'"></p>
+      <p class="text-[11px] text-slate-600 mt-1">RTDS Chainlink</p>
+    </div>
+    <div class="card rounded-xl border border-amber-800/40 p-4">
+      <p class="text-[11px] uppercase tracking-[0.2em] text-amber-500/80">Price to Beat</p>
+      <p class="text-2xl font-bold tabular-nums text-amber-400 mt-1"
+         x-text="live.beat>0 ? '$'+fmt(live.beat,2) : '—'"></p>
+      <p class="text-[11px] text-slate-600 mt-1">Polymarket openPrice</p>
+    </div>
+    <div class="card rounded-xl border p-4"
+         :class="distColor(live.dist)">
+      <p class="text-[11px] uppercase tracking-[0.2em] text-slate-400">Mesafe |BTC−Beat|</p>
+      <p class="text-2xl font-bold tabular-nums mt-1"
+         :class="live.dist>=0 ? (live.dist<=5?'text-emerald-400':live.dist<=20?'text-amber-400':'text-slate-300') : 'text-slate-500'"
+         x-text="live.dist>=0 ? '$'+fmt(live.dist,2) : '—'"></p>
+      <p class="text-[11px] text-slate-600 mt-1">yakın = flip mümkün</p>
+    </div>
+    <div class="card rounded-xl border border-fuchsia-800/40 p-4">
+      <p class="text-[11px] uppercase tracking-[0.2em] text-fuchsia-500/80">Volatilite (20s aralık)</p>
+      <p class="text-2xl font-bold tabular-nums mt-1"
+         :class="live.vol>=15 ? 'text-fuchsia-300' : 'text-slate-400'"
+         x-text="live.vol>=0 ? '$'+fmt(live.vol,2) : '—'"></p>
+      <p class="text-[11px] text-slate-600 mt-1">≥$15 = kararsız/hareketli</p>
+    </div>
+  </section>
+
+  <section class="grid grid-cols-3 gap-3 mb-6">
+    <div class="card rounded-xl border border-sky-800/40 p-4">
+      <p class="text-[11px] uppercase tracking-[0.2em] text-sky-500/80">UP fiyatı</p>
+      <p class="text-xl font-bold tabular-nums text-sky-300 mt-1"
+         x-text="live.up>=0 ? (live.up*100).toFixed(1)+'¢' : '—'"></p>
+    </div>
+    <div class="card rounded-xl border border-rose-800/40 p-4">
+      <p class="text-[11px] uppercase tracking-[0.2em] text-rose-500/80">DOWN fiyatı</p>
+      <p class="text-xl font-bold tabular-nums text-rose-300 mt-1"
+         x-text="live.down>=0 ? (live.down*100).toFixed(1)+'¢' : '—'"></p>
+    </div>
+    <div class="card rounded-xl border p-4"
+         :class="live.secLeft<=30 ? 'border-amber-600/60' : 'border-slate-800/60'">
+      <p class="text-[11px] uppercase tracking-[0.2em] text-slate-400">Kapanışa</p>
+      <p class="text-xl font-bold tabular-nums mt-1"
+         :class="live.secLeft<=30 ? 'text-amber-400 pulse' : 'text-slate-300'"
+         x-text="live.secLeft>=0 ? live.secLeft+'s' : '—'"></p>
+    </div>
+  </section>
+
+  <!-- BÖLGE ROZETLERİ: şu an hangi makas kovası aktif -->
+  <section class="mb-6">
+    <p class="text-xs uppercase tracking-widest text-slate-500 mb-2">Kararsız Bölge · şu an</p>
+    <div class="flex flex-wrap gap-2">
+      <template x-for="b in buckets" :key="b">
+        <span class="px-3 py-1.5 rounded-lg text-sm font-bold border tabular-nums"
+              :class="live.zone[b] ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300' : 'bg-slate-800/40 border-slate-700 text-slate-500'">
+          $<span x-text="b"></span> makas
+          <span x-text="live.zone[b] ? '● BÖLGEDE' : '○'"></span>
+        </span>
+      </template>
+    </div>
+  </section>
+
+  <!-- ANA ÖLÇÜM TABLOSU -->
+  <section class="card rounded-xl border border-teal-800/40 p-4 sm:p-5 mb-6 overflow-x-auto">
+    <h2 class="text-sm uppercase tracking-widest text-slate-300 mb-1">
+      Çift-Limit Ölçümü
+      <span class="text-slate-600 normal-case tracking-normal">
+        (EV/pencere &gt; 0 ise strateji matematiksel olarak kârlı)</span>
+    </h2>
+    <p class="text-[11px] text-slate-500 mb-3">
+      İki bacak dolar → <span class="text-emerald-400">+$0.50 garanti</span> ·
+      tek bacak → sonuç tutarsa +$0.75, tutmazsa −$0.25 · başabaş q=%25
+    </p>
+    <table class="w-full text-sm tabular-nums">
+      <thead>
+        <tr class="text-slate-500 text-[11px] uppercase tracking-wider border-b border-slate-700">
+          <th class="text-left py-2 pr-3">Makas</th>
+          <th class="text-center px-2 border-l border-slate-800" colspan="4">İyimser (değme yeter)</th>
+          <th class="text-center px-2 border-l border-slate-800" colspan="4">Tutucu (≥2s kalmalı)</th>
+        </tr>
+        <tr class="text-slate-600 text-[10px] uppercase">
+          <th class="text-left py-1 pr-3"></th>
+          <template x-for="m in ['opt','cons']" :key="m">
+            <template x-for="h in ['N','İki%','q%','EV/pen']" :key="m+h">
+              <th class="text-right px-2" :class="h==='N' ? 'border-l border-slate-800' : ''" x-text="h"></th>
+            </template>
+          </template>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="b in buckets" :key="b">
+          <tr class="border-b border-slate-800/60">
+            <td class="text-left py-2 pr-3 font-bold"
+                :class="live.zone[b] ? 'text-emerald-300' : 'text-slate-300'">
+              $<span x-text="b"></span></td>
+            <!-- iyimser -->
+            <td class="text-right px-2 border-l border-slate-800" x-text="cell(b,'opt').n"></td>
+            <td class="text-right px-2 text-emerald-400" x-text="cell(b,'opt').both+'%'"></td>
+            <td class="text-right px-2 text-sky-300" x-text="cell(b,'opt').q+'%'"></td>
+            <td class="text-right px-2 font-bold"
+                :class="evColor(cell(b,'opt').ev)" x-text="evTxt(cell(b,'opt').ev)"></td>
+            <!-- tutucu -->
+            <td class="text-right px-2 border-l border-slate-800" x-text="cell(b,'cons').n"></td>
+            <td class="text-right px-2 text-emerald-400" x-text="cell(b,'cons').both+'%'"></td>
+            <td class="text-right px-2 text-sky-300" x-text="cell(b,'cons').q+'%'"></td>
+            <td class="text-right px-2 font-bold"
+                :class="evColor(cell(b,'cons').ev)" x-text="evTxt(cell(b,'cons').ev)"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+    <p class="text-[11px] text-slate-600 mt-3">
+      Gerçek EV, iyimser ile tutucu arasındadır. N yeterince büyüyene kadar (≥30) sayılar oynayabilir.
+    </p>
+  </section>
+
+  <!-- SON PENCERELER -->
+  <section class="card rounded-xl border border-slate-800/60 p-4 sm:p-5">
+    <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-3">Son Pencereler</h2>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm tabular-nums">
+        <thead>
+          <tr class="text-slate-500 text-[11px] uppercase tracking-wider border-b border-slate-700">
+            <th class="text-left py-2">Pencere</th>
+            <th class="text-right px-2">Makas</th>
+            <th class="text-right px-2">Sonuç</th>
+            <th class="text-right px-2">Dolum</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="(r,i) in recent" :key="i">
+            <tr class="border-b border-slate-800/50">
+              <td class="text-left py-1.5 text-slate-400" x-text="r.label"></td>
+              <td class="text-right px-2 text-slate-300">$<span x-text="r.bucket"></span></td>
+              <td class="text-right px-2 font-bold"
+                  :class="r.outcome==='UP' ? 'text-emerald-400' : 'text-rose-400'"
+                  x-text="r.outcome"></td>
+              <td class="text-right px-2"
+                  :class="r.kind==='iki' ? 'text-emerald-300' : r.kind.startsWith('tek') ? 'text-amber-300' : 'text-slate-500'"
+                  x-text="kindTxt(r.kind)"></td>
+            </tr>
+          </template>
+          <tr x-show="recent.length===0">
+            <td colspan="4" class="text-center py-4 text-slate-600">
+              Henüz kararsız-bölge penceresi yakalanmadı — bekleniyor…</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <script>
+    function straddle() {
+      return {
+        wsOpen: false,
+        buckets: [5, 10, 20, 40],
+        live: { btc: 0, beat: 0, dist: -1, vol: -1, up: -1, down: -1, secLeft: -1,
+                zone: { 5: false, 10: false, 20: false, 40: false } },
+        stat: {},        // stat['5_opt'] = {n,both,q,ev}
+        recent: [],
+
+        init() { this.connect(); },
+
+        connect() {
+          const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+          const ws = new WebSocket(`${proto}://${location.host}/ws?token=__WS_TOKEN__`);
+          ws.onopen = () => { this.wsOpen = true; };
+          ws.onclose = () => { this.wsOpen = false; setTimeout(() => this.connect(), 1500); };
+          ws.onmessage = (e) => this.onMessage(JSON.parse(e.data));
+        },
+
+        onMessage(msg) {
+          const d = msg.data || {};
+          if (msg.type !== 'straddle') return;   // bu sayfa sadece straddle akisini dinler
+          // canli
+          const num = (v) => (v === undefined ? null : Number(v));
+          if (d.btc !== undefined) this.live.btc = num(d.btc);
+          if (d.beat !== undefined) this.live.beat = num(d.beat);
+          if (d.dist !== undefined) this.live.dist = num(d.dist);
+          if (d.vol !== undefined) this.live.vol = num(d.vol);
+          if (d.up !== undefined) this.live.up = num(d.up);
+          if (d.down !== undefined) this.live.down = num(d.down);
+          if (d.sec_left !== undefined) this.live.secLeft = num(d.sec_left);
+          for (const b of this.buckets) {
+            if (d['zone' + b] !== undefined) this.live.zone[b] = d['zone' + b] === '1';
+            for (const m of ['opt', 'cons']) {
+              const p = `b${b}_${m}`;
+              if (d[p + '_n'] !== undefined) {
+                this.stat[`${b}_${m}`] = {
+                  n: Number(d[p + '_n']), both: Number(d[p + '_both']),
+                  q: Number(d[p + '_q']), ev: Number(d[p + '_ev'])
+                };
+              }
+            }
+          }
+          if (d.recent !== undefined) this.parseRecent(d.recent);
+        },
+
+        parseRecent(s) {
+          const out = [];
+          for (const part of String(s).split(';')) {
+            if (!part) continue;
+            const [win, bucket, outcome, kind] = part.split('|');
+            const w = Number(win);
+            const st = new Date(w * 1000), en = new Date((w + 300) * 1000);
+            const hh = x => String(x).padStart(2, '0');
+            out.push({
+              label: `${hh(st.getHours())}:${hh(st.getMinutes())}-${hh(en.getHours())}:${hh(en.getMinutes())}`,
+              bucket, outcome, kind
+            });
+          }
+          this.recent = out.reverse();   // en yeni ustte
+        },
+
+        cell(b, m) { return this.stat[`${b}_${m}`] || { n: 0, both: '0.0', q: '0.0', ev: 0 }; },
+        fmt(v, d) { return Number(v).toFixed(d); },
+        evTxt(ev) { const n = Number(ev); return (n >= 0 ? '+$' : '−$') + Math.abs(n).toFixed(3); },
+        evColor(ev) { const n = Number(ev); return n > 0.0005 ? 'text-emerald-400' : n < -0.0005 ? 'text-rose-400' : 'text-slate-500'; },
+        distColor(d) { return d >= 0 && d <= 5 ? 'border-emerald-700/50' : 'border-slate-800/60'; },
+        kindTxt(k) {
+          return k === 'iki' ? '✓ iki bacak' : k === 'tek-up' ? 'tek UP' :
+                 k === 'tek-down' ? 'tek DOWN' : '— hiç';
+        }
+      };
+    }
+  </script>
+</body>

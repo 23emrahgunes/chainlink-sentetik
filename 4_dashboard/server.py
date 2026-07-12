@@ -60,6 +60,7 @@ STREAMS = {
     "stream:polymarket": "poly",
     "stream:pnl": "pnl",
     "stream:measure": "measure",
+    "stream:straddle": "straddle",
     "stream:trades": "trade",
     "stream:signals": "signal",
     "stream:executions": "execution",
@@ -152,6 +153,16 @@ async def index(request: Request) -> HTMLResponse:
     return HTMLResponse(html)
 
 
+@app.get("/straddle")
+async def straddle(request: Request) -> HTMLResponse:
+    """STRADDLE LAB — cift-limit olcum sayfasi (ayri sayfa, ayni WS)."""
+    if AUTH_ON:
+        _require_auth(request)
+    html = (HERE / "straddle.html").read_text(encoding="utf-8")
+    html = html.replace("__WS_TOKEN__", WS_TOKEN)
+    return HTMLResponse(html)
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     if AUTH_ON and not secrets.compare_digest(ws.query_params.get("token", ""), WS_TOKEN):
@@ -170,6 +181,10 @@ async def ws_endpoint(ws: WebSocket) -> None:
         rows = await client.xrange("stream:trades", count=500)
         for _id, fields in rows:
             await ws.send_json({"type": "trade", "data": fields})
+        # Son STRADDLE snapshot (sayfa bos acilmasin).
+        srows = await client.xrevrange("stream:straddle", count=1)
+        for _id, fields in srows:
+            await ws.send_json({"type": "straddle", "data": fields})
     except Exception:
         pass
     finally:
