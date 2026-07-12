@@ -108,7 +108,9 @@ async def run(stop: asyncio.Event) -> None:
         value_max=float(os.getenv("OBI_VALUE_MAX", "0.90")),
         min_entry=float(os.getenv("OBI_MIN_ENTRY", "0.02")),
         dip_max=float(os.getenv("DIP_MAX", "0.30")),
-        lock_at_sec=_lock_at)
+        lock_at_sec=_lock_at,
+        reversal_window_sec=int(os.getenv("REVERSAL_WINDOW_SEC", "60")),
+        margin_max=float(os.getenv("REVERSAL_MARGIN_MAX", "0.0012")))
     # OBI diverjans/isabet olcumu (islemsiz) — edge var mi ampirik.
     meter = SignalMeter(sample_at_sec=int(os.getenv("SIGNAL_SAMPLE_SEC", "90")),
                         strong=obi_entry)
@@ -239,7 +241,7 @@ async def run(stop: asyncio.Event) -> None:
             now_sec = int(now_ms // 1000)
             # Sadece AKTIF pencereye ait oran (rollover bayat/uc oran sizmasin).
             poly_up_win = poly.for_window(win_ts, max_stale_ms=3000)
-            trader.update(win_ts, now_sec, obi_ema, poly_up_win, p2b.closed)
+            trader.update(win_ts, now_sec, obi_ema, poly_up_win, spot_ref, strike, p2b.closed)
             meter.update(win_ts, now_sec, obi_ema, poly_up_win, p2b.closed)
             # Settle edilen islemleri gecmis tablosu icin yayinla.
             for rec in trader.drain():
