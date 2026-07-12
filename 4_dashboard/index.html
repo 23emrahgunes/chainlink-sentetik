@@ -197,6 +197,30 @@
                 : ('right:50%; width:' + Math.min(Math.abs(obi)*50,50) + '%')"></div>
       </div>
     </div>
+
+    <!-- DEX akışı (Uniswap V3 WBTC, GeckoTerminal) -->
+    <div class="mb-5">
+      <div class="flex justify-between items-baseline text-[11px] mb-1">
+        <span class="text-rose-400">◄ DEX satış</span>
+        <span class="text-slate-400">DEX akışı:
+          <span class="font-bold tabular-nums"
+                :class="dexFlow > 0.05 ? 'text-emerald-400' : dexFlow < -0.05 ? 'text-rose-400' : 'text-slate-300'"
+                x-text="(dexFlow >= 0 ? '+' : '') + dexFlow.toFixed(3)"></span>
+          <span class="text-slate-600" x-text="'(' + dexBuys + '↑/' + dexSells + '↓)'"></span>
+          <span class="text-slate-600" x-show="dexPrice">· WBTC $<span x-text="dexPrice"></span></span>
+          <span class="text-slate-600" x-show="dexLiq">· likidite $<span x-text="(dexLiq/1e6).toFixed(1)"></span>M</span>
+        </span>
+        <span class="text-emerald-400">DEX alış ►</span>
+      </div>
+      <div class="relative h-3 bg-slate-800/70 rounded-full overflow-hidden">
+        <div class="absolute left-1/2 top-0 bottom-0 w-px bg-slate-500 z-10"></div>
+        <div class="absolute top-0 bottom-0 transition-all duration-300"
+             :class="dexFlow >= 0 ? 'bg-sky-500/70' : 'bg-orange-500/70'"
+             :style="dexFlow >= 0
+                ? ('left:50%; width:' + Math.min(Math.abs(dexFlow)*50,50) + '%')
+                : ('right:50%; width:' + Math.min(Math.abs(dexFlow)*50,50) + '%')"></div>
+      </div>
+    </div>
     <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
       <div>
         <p class="text-[11px] uppercase tracking-widest text-slate-500">Net PnL</p>
@@ -309,6 +333,7 @@
         obi: 0,               // order book imbalance (-1..+1, derinlik baskisi)
         usdt: null,           // USDT/USD kuru
         chainlinkPrice: null, // Polymarket RTDS gercek Chainlink BTC/USD (canli)
+        dexFlow: 0, dexPrice: null, dexLiq: 0, dexBuys: 0, dexSells: 0, // DEX akisi
         polyPrice: null,      // Polymarket YES olasiligi (0..1)
         lastKarar: null,      // son execution karari (ONAYLI/RED)
         lastKararDir: '',     // son karar yonu (LONG/SHORT)
@@ -351,6 +376,11 @@
             if (d.obi !== undefined) this.obi = Number(d.obi);
             if (d.usdt) this.usdt = Number(d.usdt).toFixed(4);
             if (d.chainlink && Number(d.chainlink) > 0) this.chainlinkPrice = Number(d.chainlink).toFixed(2);
+            if (d.dex_flow !== undefined) this.dexFlow = Number(d.dex_flow);
+            if (d.dex_price && Number(d.dex_price) > 0) this.dexPrice = Number(d.dex_price).toFixed(2);
+            if (d.dex_liq) this.dexLiq = Number(d.dex_liq);
+            if (d.dex_buys) this.dexBuys = Number(d.dex_buys);
+            if (d.dex_sells) this.dexSells = Number(d.dex_sells);
             return;
           }
           if (msg.type === 'poly') {              // Polymarket YES fiyati (0..1)

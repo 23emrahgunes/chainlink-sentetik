@@ -21,6 +21,7 @@ import numpy as np
 from dotenv import load_dotenv
 
 from chainlink_feed import ChainlinkFeed
+from dex_feed import DexFeed
 from obi_matrix import compute_obi
 from paper_trader import PaperTrader
 from polymarket_feed import PolyFeed
@@ -89,6 +90,11 @@ async def run(stop: asyncio.Event) -> None:
     # Polymarket RTDS: gercek canli Chainlink BTC/USD (market'in cozuldugu fiyat).
     chainlink = ChainlinkFeed(consumer.client)
     chainlink_task = asyncio.ensure_future(chainlink.run(stop))
+    # DEX akisi (Uniswap V3 WBTC, GeckoTerminal) — alim/satim baskisi + likidite.
+    dex = DexFeed(network=os.getenv("DEX_NETWORK", "arbitrum"),
+                  pool=os.getenv("DEX_POOL", "0x0e4831319a50228b9e450861297ab92dee15b44f"),
+                  timeframe=os.getenv("DEX_TIMEFRAME", "m15"))
+    dex_task = asyncio.ensure_future(dex.run(stop))
     # Kagit-ustu trader (DRY_RUN, $1): OBI-suruculu — derinlik baskisini sezip
     # fiyat kirilmadan once yon tahmini.
     trader = PaperTrader(
@@ -201,7 +207,10 @@ async def run(stop: asyncio.Event) -> None:
                         {"p_cex": f"{p_cex:.4f}", "spot_ref": f"{spot_ref:.4f}",
                          "sources": str(n_src), "strike": f"{strike:.2f}",
                          "obi": f"{obi_ema:.4f}", "usdt": f"{usdt.rate:.5f}",
-                         "chainlink": f"{chainlink.price:.2f}", "ts": str(int(now_ms))},
+                         "chainlink": f"{chainlink.price:.2f}",
+                         "dex_flow": f"{dex.flow:.4f}", "dex_price": f"{dex.price:.2f}",
+                         "dex_liq": f"{dex.liquidity:.0f}", "dex_buys": str(dex.buys),
+                         "dex_sells": str(dex.sells), "ts": str(int(now_ms))},
                         maxlen=10, approximate=True,
                     )
                 except Exception as exc:
@@ -244,6 +253,7 @@ async def run(stop: asyncio.Event) -> None:
         p2b_task.cancel()
         usdt_task.cancel()
         chainlink_task.cancel()
+        dex_task.cancel()
         await stream.aclose()
         await consumer.close()
         log.info("[BRAIN] tuketici kapatildi. Atilan(bayat) kayit: %d",
