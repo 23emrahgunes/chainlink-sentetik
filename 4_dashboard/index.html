@@ -352,7 +352,7 @@
 
         connect() {
           const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-          const ws = new WebSocket(`${proto}://${location.host}/ws`);
+          const ws = new WebSocket(`${proto}://${location.host}/ws?token=__WS_TOKEN__`);
           ws.onopen = () => { this.wsOpen = true; };
           ws.onclose = () => {
             this.wsOpen = false; this.redisOk = false;

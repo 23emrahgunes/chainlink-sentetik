@@ -9,15 +9,17 @@ KISIT: Veri uzerinde HICBIR matematiksel islem yapilmaz.
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import redis.asyncio as redis
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 
 # .env: kok dizin (diger ajanlarla ayni desen), sonra yerel.
 load_dotenv("../.env")
@@ -28,6 +30,26 @@ log = logging.getLogger("dash")
 
 REDIS_ADDR = os.getenv("REDIS_ADDR", "127.0.0.1:6379")
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+
+# --- Dashboard erisim korumasi (Basic auth). DASHBOARD_PASS bos ise auth KAPALI. ---
+DASH_USER = os.getenv("DASHBOARD_USER", "admin")
+DASH_PASS = os.getenv("DASHBOARD_PASS", "")
+AUTH_ON = bool(DASH_PASS)
+WS_TOKEN = secrets.token_urlsafe(24)  # her baslangicta yeni; sayfaya enjekte edilir
+
+
+def _require_auth(request: Request) -> None:
+    """Basic auth kontrolu (AUTH_ON ise). Basarisizsa 401 + tarayici sifre sorar."""
+    hdr = request.headers.get("Authorization", "")
+    if hdr.startswith("Basic "):
+        try:
+            u, p = base64.b64decode(hdr[6:]).decode("utf-8", "ignore").split(":", 1)
+        except Exception:
+            u = p = ""
+        if secrets.compare_digest(u, DASH_USER) and secrets.compare_digest(p, DASH_PASS):
+            return
+    raise HTTPException(status_code=401, detail="Yetkisiz",
+                        headers={"WWW-Authenticate": 'Basic realm="GHOST ORACLE"'})
 PORT = int(os.getenv("DASHBOARD_PORT", "8000"))
 HERE = Path(__file__).parent
 
@@ -120,12 +142,19 @@ app = FastAPI(title="GHOST ORACLE Dashboard", lifespan=lifespan)
 
 
 @app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(HERE / "index.html")
+async def index(request: Request) -> HTMLResponse:
+    if AUTH_ON:
+        _require_auth(request)
+    html = (HERE / "index.html").read_text(encoding="utf-8")
+    html = html.replace("__WS_TOKEN__", WS_TOKEN)  # WS icin token enjekte et
+    return HTMLResponse(html)
 
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
+    if AUTH_ON and not secrets.compare_digest(ws.query_params.get("token", ""), WS_TOKEN):
+        await ws.close(code=1008)  # policy violation
+        return
     await manager.connect(ws)
     # Baglanti aninda Redis durumu + islem gecmisi (stream:trades) gonder.
     client = _make_client()
