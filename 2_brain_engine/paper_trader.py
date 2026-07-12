@@ -22,10 +22,11 @@ WINDOW_SEC = 300  # kapanmis pencereler END zamaniyla anahtarli (start+300)
 
 class PaperTrader:
     def __init__(self, stake: float = 1.0, obi_entry: float = 0.25,
-                 value_max: float = 0.90) -> None:
+                 value_max: float = 0.90, min_entry: float = 0.15) -> None:
         self.stake = stake
         self.obi_entry = obi_entry    # |OBI| bu esigi asinca yon tahmini (derinlik baskisi)
-        self.value_max = value_max    # Polymarket orani bu ustundeyse zaten fiyatlamis (pahali)
+        self.value_max = value_max    # oran bu ustundeyse zaten fiyatlamis (pahali)
+        self.min_entry = min_entry    # oran bu altindaysa longshot/bayat (rollover artigi) -> girme
         self.pnl = 0.0
         self.trades = 0
         self.wins = 0
@@ -56,15 +57,17 @@ class PaperTrader:
                 slot["locked"] = True
                 direction = "LONG" if obi > 0 else "SHORT"   # OBI>0 alim baskisi -> UP
                 price = poly_up if direction == "LONG" else (1.0 - poly_up)
-                if 0.0 < price <= self.value_max:
+                # Sadece MAKUL oran araliginda gir: cok dusuk = longshot/bayat rollover
+                # artigi (sahte 66:1), cok yuksek = zaten fiyatlanmis.
+                if self.min_entry <= price <= self.value_max:
                     slot["dir"] = direction
                     slot["entry_price"] = price
                     log.info("[PAPER] OBI GIRIS %s @ %.3f (OBI=%+.3f, pencere %d)",
                              "UP" if direction == "LONG" else "DOWN", price, obi, win_ts)
                 else:
                     slot["dir"] = "PAS"
-                    log.info("[PAPER] PAS: OBI=%+.3f ama oran %.3f zaten pahali (>%.2f)",
-                             obi, price, self.value_max)
+                    log.info("[PAPER] PAS: OBI=%+.3f oran %.3f araligin disinda [%.2f, %.2f]",
+                             obi, price, self.min_entry, self.value_max)
 
     def _settle_pending(self, closed: dict) -> None:
         still = []

@@ -100,7 +100,8 @@ async def run(stop: asyncio.Event) -> None:
     trader = PaperTrader(
         stake=float(os.getenv("PAPER_STAKE", "1.0")),
         obi_entry=obi_entry,
-        value_max=float(os.getenv("OBI_VALUE_MAX", "0.90")))
+        value_max=float(os.getenv("OBI_VALUE_MAX", "0.90")),
+        min_entry=float(os.getenv("OBI_MIN_ENTRY", "0.15")))
     last_pnl_pub = 0.0
 
     # 5 borsanin en son kotasyonu (src -> quote). Sentetik kuresel fiyat icin.
