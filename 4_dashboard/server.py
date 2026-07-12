@@ -167,7 +167,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
     await ws.send_json({"type": "status", "redis": redis_ok})
     try:
         # Gecmis islemleri en eskiden yeniye sirayla gonder (tablo dolsun).
-        rows = await client.xrange("stream:trades", count=50)
+        rows = await client.xrange("stream:trades", count=500)
         for _id, fields in rows:
             await ws.send_json({"type": "trade", "data": fields})
     except Exception:

@@ -246,7 +246,7 @@ async def run(stop: asyncio.Event) -> None:
                         "profit": f"{rec['profit']:.4f}",
                         "entry": f"{rec['entry']:.4f}",
                         "pnl_after": f"{rec['pnl_after']:.4f}",
-                    }, maxlen=50, approximate=True)
+                    }, maxlen=500, approximate=True)
                 except Exception as exc:
                     log.error("[TRADES] xadd hatasi: %s", exc)
             if now_ms - last_pnl_pub >= 1000:

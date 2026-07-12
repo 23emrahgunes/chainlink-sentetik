@@ -311,7 +311,7 @@
           </tr>
         </thead>
         <tbody>
-          <template x-for="t in tradesList" :key="t.win">
+          <template x-for="t in pagedTrades" :key="t.win">
             <tr class="border-b border-slate-900/60">
               <td class="py-2 text-slate-400 tabular-nums" x-text="t.label"></td>
               <td class="py-2 font-bold"
@@ -342,6 +342,17 @@
         </tbody>
       </table>
     </div>
+    <!-- Sayfalama (50/sayfa) -->
+    <div class="flex items-center justify-between mt-4 text-sm" x-show="tradesList.length > pageSize">
+      <span class="text-slate-500"
+            x-text="'Toplam ' + tradesList.length + ' işlem · sayfa ' + page + '/' + totalPages"></span>
+      <div class="flex items-center gap-2">
+        <button class="px-3 py-1 rounded border border-slate-700 text-slate-300 disabled:opacity-30 hover:bg-slate-800"
+                :disabled="page <= 1" @click="page = Math.max(1, page - 1)">‹ Önceki</button>
+        <button class="px-3 py-1 rounded border border-slate-700 text-slate-300 disabled:opacity-30 hover:bg-slate-800"
+                :disabled="page >= totalPages" @click="page = Math.min(totalPages, page + 1)">Sonraki ›</button>
+      </div>
+    </div>
   </section>
 
   <script>
@@ -368,7 +379,13 @@
         pnl: 0, trades: 0, wins: 0, losses: 0, winRate: 0, paperOpen: false,
         lastResult: false, lastDir: '', lastOutcome: '', lastWon: false, lastProfit: 0,
         tradesList: [],       // islem gecmisi
+        page: 1, pageSize: 50, // sayfalama
         obiHit: 0, obiN: 0, strongHit: 0, strongN: 0, contraHit: 0, contraN: 0, // OBI olcum
+        get totalPages() { return Math.max(1, Math.ceil(this.tradesList.length / this.pageSize)); },
+        get pagedTrades() {
+          const s = (this.page - 1) * this.pageSize;
+          return this.tradesList.slice(s, s + this.pageSize);
+        },
         _prices: [],          // sparkline icin son ~60 mid nokta
         _rowId: 0,
         _msgCount: 0,
@@ -437,7 +454,7 @@
                 entry: Number(d.entry), won: d.won === '1',
                 profit: Number(d.profit), pnl_after: Number(d.pnl_after)
               });
-              if (this.tradesList.length > 30) this.tradesList.pop();
+              if (this.tradesList.length > 500) this.tradesList.pop();
             }
             return;
           }
