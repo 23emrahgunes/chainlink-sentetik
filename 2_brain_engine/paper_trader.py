@@ -22,11 +22,13 @@ WINDOW_SEC = 300  # kapanmis pencereler END zamaniyla anahtarli (start+300)
 
 class PaperTrader:
     def __init__(self, stake: float = 1.0, obi_entry: float = 0.25,
-                 value_max: float = 0.90, min_entry: float = 0.05) -> None:
+                 value_max: float = 0.90, min_entry: float = 0.05,
+                 lock_at_sec: int = 90) -> None:
         self.stake = stake
         self.obi_entry = obi_entry    # |OBI| bu esigi asinca yon tahmini (derinlik baskisi)
         self.value_max = value_max    # oran bu ustundeyse zaten fiyatlamis (pahali)
         self.min_entry = min_entry    # oran bu altindaysa longshot/bayat (rollover artigi) -> girme
+        self.lock_at = lock_at_sec    # pencereye kac sn sonra karar (KARARLI OBI, gurultuye girme)
         self.pnl = 0.0
         self.trades = 0
         self.wins = 0
@@ -49,16 +51,15 @@ class PaperTrader:
             self.open_trade = {"win": win_ts, "dir": None,
                                "entry_price": 0.0, "locked": False}
 
-        # 3) OBI-SURUCULU: derinlik baskisi (|OBI|) esigi asinca yon tahmini.
-        #    Fiyat kirilmadan ONCE sez -> Polymarket henuz fiyatlamadiysa ucuz gir.
+        # 3) OBI-SURUCULU: pencereye lock_at sn sonra KARARLI OBI ile karar
+        #    (ilk crossing gurultuye giriyordu; olcum de bu noktada ornekliyor).
         slot = self.open_trade
-        if not slot["locked"] and abs(obi) >= self.obi_entry:
-            if poly_up is not None and poly_up >= 0:
-                slot["locked"] = True
+        if not slot["locked"] and (now_sec - win_ts) >= self.lock_at:
+            slot["locked"] = True
+            if abs(obi) >= self.obi_entry and poly_up is not None and poly_up >= 0:
                 direction = "LONG" if obi > 0 else "SHORT"   # OBI>0 alim baskisi -> UP
                 price = poly_up if direction == "LONG" else (1.0 - poly_up)
-                # Sadece MAKUL oran araliginda gir: cok dusuk = longshot/bayat rollover
-                # artigi (sahte 66:1), cok yuksek = zaten fiyatlanmis.
+                # Sadece MAKUL oran araliginda gir: cok dusuk = longshot/bayat, cok yuksek = pahali.
                 if self.min_entry <= price <= self.value_max:
                     slot["dir"] = direction
                     slot["entry_price"] = price
@@ -68,6 +69,8 @@ class PaperTrader:
                     slot["dir"] = "PAS"
                     log.info("[PAPER] PAS: OBI=%+.3f oran %.3f araligin disinda [%.2f, %.2f]",
                              obi, price, self.min_entry, self.value_max)
+            else:
+                slot["dir"] = "PAS"  # OBI zayif ya da oran yok -> islem yok
 
     def _settle_pending(self, closed: dict) -> None:
         still = []

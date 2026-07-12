@@ -102,7 +102,8 @@ async def run(stop: asyncio.Event) -> None:
         stake=float(os.getenv("PAPER_STAKE", "1.0")),
         obi_entry=obi_entry,
         value_max=float(os.getenv("OBI_VALUE_MAX", "0.90")),
-        min_entry=float(os.getenv("OBI_MIN_ENTRY", "0.05")))
+        min_entry=float(os.getenv("OBI_MIN_ENTRY", "0.05")),
+        lock_at_sec=int(os.getenv("SIGNAL_SAMPLE_SEC", "90")))  # olcumle AYNI nokta
     # OBI diverjans/isabet olcumu (islemsiz) — edge var mi ampirik.
     meter = SignalMeter(sample_at_sec=int(os.getenv("SIGNAL_SAMPLE_SEC", "90")),
                         strong=obi_entry)
