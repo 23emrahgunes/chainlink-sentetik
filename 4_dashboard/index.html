@@ -64,6 +64,34 @@
     </div>
   </section>
 
+  <!-- OBI DİVERJANS ÖLÇÜMÜ (işlemsiz — edge var mı ampirik) -->
+  <section class="card rounded-xl border border-indigo-800/40 p-5 mb-6 shadow-xl">
+    <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-1">
+      OBI İsabet Ölçümü <span class="text-slate-600 normal-case tracking-normal">(işlemsiz · OBI 5dk sonucu tahmin ediyor mu?)</span>
+    </h2>
+    <p class="text-[11px] text-slate-600 mb-4">%55+ = edge VAR · ~%50 = edge YOK · &lt;%45 = ters (kontra çevir)</p>
+    <div class="grid grid-cols-3 gap-4" x-data="{ col: h => h>=55?'text-emerald-400':h>0&&h<45?'text-rose-400':'text-slate-300' }">
+      <div>
+        <p class="text-[11px] uppercase tracking-widest text-slate-500">Genel OBI isabet</p>
+        <p class="text-3xl font-bold tabular-nums" :class="col(obiHit)"
+           x-text="obiN>0 ? obiHit + '%' : '—'"></p>
+        <p class="text-[11px] text-slate-600" x-text="obiN + ' pencere'"></p>
+      </div>
+      <div>
+        <p class="text-[11px] uppercase tracking-widest text-slate-500">Güçlü OBI isabet</p>
+        <p class="text-3xl font-bold tabular-nums" :class="col(strongHit)"
+           x-text="strongN>0 ? strongHit + '%' : '—'"></p>
+        <p class="text-[11px] text-slate-600" x-text="strongN + ' pencere (|OBI|≥eşik)'"></p>
+      </div>
+      <div>
+        <p class="text-[11px] uppercase tracking-widest text-slate-500">Kontra isabet (market'e ters)</p>
+        <p class="text-3xl font-bold tabular-nums" :class="col(contraHit)"
+           x-text="contraN>0 ? contraHit + '%' : '—'"></p>
+        <p class="text-[11px] text-slate-600" x-text="contraN + ' pencere'"></p>
+      </div>
+    </div>
+  </section>
+
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <!-- Kutu 1: Son 5 Sinyal -->
     <section class="card lg:col-span-2 rounded-xl border border-slate-800 p-5 shadow-xl">
@@ -340,6 +368,7 @@
         pnl: 0, trades: 0, wins: 0, losses: 0, winRate: 0, paperOpen: false,
         lastResult: false, lastDir: '', lastOutcome: '', lastWon: false, lastProfit: 0,
         tradesList: [],       // islem gecmisi
+        obiHit: 0, obiN: 0, strongHit: 0, strongN: 0, contraHit: 0, contraN: 0, // OBI olcum
         _prices: [],          // sparkline icin son ~60 mid nokta
         _rowId: 0,
         _msgCount: 0,
@@ -386,6 +415,13 @@
           if (msg.type === 'poly') {              // Polymarket YES fiyati (0..1)
             const m = Number(d.mid);
             if (m > 0) this.polyPrice = m;
+            return;
+          }
+
+          if (msg.type === 'measure') {           // OBI isabet olcumu
+            this.obiHit = Number(d.obi_hit); this.obiN = Number(d.obi_n);
+            this.strongHit = Number(d.strong_hit); this.strongN = Number(d.strong_n);
+            this.contraHit = Number(d.contra_hit); this.contraN = Number(d.contra_n);
             return;
           }
 

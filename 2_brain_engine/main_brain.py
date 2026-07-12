@@ -26,6 +26,7 @@ from obi_matrix import compute_obi
 from paper_trader import PaperTrader
 from polymarket_feed import PolyFeed
 from pricetobeat_feed import PriceToBeatFeed
+from signal_meter import SignalMeter
 from redis_consumer import RedisConsumer
 from usdt_feed import UsdtUsdFeed
 from synthetic_oracle import compute_pcex
@@ -102,6 +103,9 @@ async def run(stop: asyncio.Event) -> None:
         obi_entry=obi_entry,
         value_max=float(os.getenv("OBI_VALUE_MAX", "0.90")),
         min_entry=float(os.getenv("OBI_MIN_ENTRY", "0.05")))
+    # OBI diverjans/isabet olcumu (islemsiz) — edge var mi ampirik.
+    meter = SignalMeter(sample_at_sec=int(os.getenv("SIGNAL_SAMPLE_SEC", "90")),
+                        strong=obi_entry)
     last_pnl_pub = 0.0
 
     # 5 borsanin en son kotasyonu (src -> quote). Sentetik kuresel fiyat icin.
@@ -230,6 +234,7 @@ async def run(stop: asyncio.Event) -> None:
             # Sadece AKTIF pencereye ait oran (rollover bayat/uc oran sizmasin).
             poly_up_win = poly.for_window(win_ts, max_stale_ms=3000)
             trader.update(win_ts, now_sec, obi_ema, poly_up_win, p2b.closed)
+            meter.update(win_ts, now_sec, obi_ema, poly_up_win, p2b.closed)
             # Settle edilen islemleri gecmis tablosu icin yayinla.
             for rec in trader.drain():
                 try:
@@ -248,6 +253,8 @@ async def run(stop: asyncio.Event) -> None:
                 last_pnl_pub = now_ms
                 try:
                     await consumer.client.xadd("stream:pnl", trader.snapshot(),
+                                               maxlen=10, approximate=True)
+                    await consumer.client.xadd("stream:measure", meter.snapshot(),
                                                maxlen=10, approximate=True)
                 except Exception as exc:
                     log.error("[PNL] xadd hatasi: %s", exc)

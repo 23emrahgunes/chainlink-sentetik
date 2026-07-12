@@ -59,6 +59,7 @@ STREAMS = {
     "stream:synthetic": "synthetic",
     "stream:polymarket": "poly",
     "stream:pnl": "pnl",
+    "stream:measure": "measure",
     "stream:trades": "trade",
     "stream:signals": "signal",
     "stream:executions": "execution",
