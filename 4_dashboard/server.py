@@ -21,9 +21,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
-# .env: kok dizin (diger ajanlarla ayni desen), sonra yerel.
-load_dotenv("../.env")
-load_dotenv(".env")
+# .env: repo koku + yerel (mutlak yol — CWD ne olursa olsun bulunur).
+_HERE = Path(__file__).parent
+load_dotenv(_HERE.parent / ".env")
+load_dotenv(_HERE / ".env")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [dash] %(message)s")
 log = logging.getLogger("dash")
