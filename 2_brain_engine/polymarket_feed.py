@@ -23,6 +23,7 @@ class PolyFeed:
         self._client = client
         self.mid: float = 0.0
         self.ts: float = 0.0  # UnixMilli
+        self.window_ts: int = 0  # bu oranin ait oldugu 5dk market penceresi
         self._last_id = "$"
 
     def snapshot(self, max_stale_ms: float = 2000) -> tuple[float, bool]:
@@ -31,6 +32,14 @@ class PolyFeed:
             return 0.0, False
         fresh = (time.time() * 1000 - self.ts) <= max_stale_ms
         return self.mid, fresh
+
+    def for_window(self, win_ts: int, max_stale_ms: float = 3000) -> float:
+        """Sadece AKTIF pencereye ait taze mid'i dondurur; degilse -1
+        (rollover'da eski market'in bayat/uc orani sizmasin)."""
+        mid, fresh = self.snapshot(max_stale_ms)
+        if not fresh or self.window_ts != win_ts:
+            return -1.0
+        return mid
 
     async def run(self, stop) -> None:
         """Arka plan gorevi: task olarak baslatilir, kapatilirken cancel edilir."""
@@ -51,5 +60,6 @@ class PolyFeed:
                     try:
                         self.mid = float(fields.get("mid", "0"))
                         self.ts = float(fields.get("ts", "0"))
+                        self.window_ts = int(float(fields.get("window_ts", "0")))
                     except (TypeError, ValueError):
                         continue

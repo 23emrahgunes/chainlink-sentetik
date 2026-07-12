@@ -22,7 +22,7 @@ WINDOW_SEC = 300  # kapanmis pencereler END zamaniyla anahtarli (start+300)
 
 class PaperTrader:
     def __init__(self, stake: float = 1.0, obi_entry: float = 0.25,
-                 value_max: float = 0.90, min_entry: float = 0.15) -> None:
+                 value_max: float = 0.90, min_entry: float = 0.05) -> None:
         self.stake = stake
         self.obi_entry = obi_entry    # |OBI| bu esigi asinca yon tahmini (derinlik baskisi)
         self.value_max = value_max    # oran bu ustundeyse zaten fiyatlamis (pahali)

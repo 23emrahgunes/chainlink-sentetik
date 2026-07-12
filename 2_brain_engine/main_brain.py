@@ -101,7 +101,7 @@ async def run(stop: asyncio.Event) -> None:
         stake=float(os.getenv("PAPER_STAKE", "1.0")),
         obi_entry=obi_entry,
         value_max=float(os.getenv("OBI_VALUE_MAX", "0.90")),
-        min_entry=float(os.getenv("OBI_MIN_ENTRY", "0.15")))
+        min_entry=float(os.getenv("OBI_MIN_ENTRY", "0.05")))
     last_pnl_pub = 0.0
 
     # 5 borsanin en son kotasyonu (src -> quote). Sentetik kuresel fiyat icin.
@@ -227,7 +227,9 @@ async def run(stop: asyncio.Event) -> None:
             # --- Kagit-ustu trade + PnL (momentum + Polymarket teyidi) ---
             win_ts = win * window_sec
             now_sec = int(now_ms // 1000)
-            trader.update(win_ts, now_sec, obi_ema, poly_up, p2b.closed)
+            # Sadece AKTIF pencereye ait oran (rollover bayat/uc oran sizmasin).
+            poly_up_win = poly.for_window(win_ts, max_stale_ms=3000)
+            trader.update(win_ts, now_sec, obi_ema, poly_up_win, p2b.closed)
             # Settle edilen islemleri gecmis tablosu icin yayinla.
             for rec in trader.drain():
                 try:
