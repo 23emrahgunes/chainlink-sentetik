@@ -419,7 +419,7 @@
       </table>
     </div>
     <!-- Sayfalama (50/sayfa) -->
-    <div class="flex items-center justify-between mt-4 text-sm" x-show="tradesList.length > pageSize">
+    <div class="flex items-center justify-between mt-4 text-sm" x-show="totalPages > 1">
       <span class="text-slate-500"
             x-text="'Toplam ' + tradesList.length + ' işlem · sayfa ' + page + '/' + totalPages"></span>
       <div class="flex items-center gap-2">
@@ -455,10 +455,11 @@
         pnl: 0, trades: 0, wins: 0, losses: 0, winRate: 0, paperOpen: false,
         lastResult: false, lastDir: '', lastOutcome: '', lastWon: false, lastProfit: 0,
         tradesList: [],       // islem gecmisi
-        page: 1, pageSize: 50, // sayfalama
+        page: 1, pageSize: 20, // sayfalama (20/sayfa)
         obiHit: 0, obiN: 0, strongHit: 0, strongN: 0, contraHit: 0, contraN: 0, // OBI olcum
         get totalPages() { return Math.max(1, Math.ceil(this.tradesList.length / this.pageSize)); },
         get pagedTrades() {
+          if (this.page > this.totalPages) this.page = this.totalPages; // liste kuculurse sabitle
           const s = (this.page - 1) * this.pageSize;
           return this.tradesList.slice(s, s + this.pageSize);
         },
