@@ -61,6 +61,7 @@ STREAMS = {
     "stream:pnl": "pnl",
     "stream:measure": "measure",
     "stream:straddle": "straddle",
+    "stream:obicmp": "obicmp",
     "stream:trades": "trade",
     "stream:signals": "signal",
     "stream:executions": "execution",

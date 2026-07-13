@@ -28,6 +28,7 @@ from polymarket_feed import PolyFeed
 from pricetobeat_feed import PriceToBeatFeed
 from signal_meter import SignalMeter
 from straddle_meter import StraddleMeter
+from obi_compare_meter import ObiCompareMeter
 from redis_consumer import RedisConsumer
 from usdt_feed import UsdtUsdFeed
 from synthetic_oracle import compute_pcex
@@ -53,6 +54,18 @@ def _f(field: dict, key: str) -> float:
         return 0.0
 
 
+def _group_obi(quotes: dict, srcs: set, now_ms: float, ttl: float) -> float:
+    """Belirli borsa grubunun (perp/spot) derinlik OBI'si — olcum icin (NumPy C-level)."""
+    bv, av = [], []
+    for s, q in quotes.items():
+        if s in srcs and now_ms - q["ts"] <= ttl:
+            bv.append(q["bid_vol"])
+            av.append(q["ask_vol"])
+    if not bv:
+        return 0.0
+    return compute_obi(np.array(bv, dtype=np.float64), np.array(av, dtype=np.float64))
+
+
 async def run(stop: asyncio.Event) -> None:
     mode = os.getenv("TRADING_MODE", "DRY_RUN")
     addr = os.getenv("REDIS_ADDR", "127.0.0.1:6379")
@@ -68,6 +81,9 @@ async def run(stop: asyncio.Event) -> None:
     spot_sources = set(os.getenv("SPOT_SOURCES", "coinbase,kraken").split(","))
     # USDT-quote borsalar: fiyatlari USDT/USD kuruyla USD'ye cevrilir.
     usdt_sources = set(os.getenv("USDT_SOURCES", "binance,bybit,okx").split(","))
+    # OBI kiyas gruplari (olcum): perp defter vs spot defter — hangisi daha iyi tahmin?
+    perp_obi_srcs = set(os.getenv("PERP_OBI_SOURCES", "binance,bybit").split(","))
+    spot_obi_srcs = set(os.getenv("SPOT_OBI_SOURCES", "coinbase,kraken,okx").split(","))
 
     log.info("=== GHOST ORACLE v5.0 :: Analytical Brain ===")
     log.info("TRADING_MODE = %s", mode)
@@ -115,6 +131,8 @@ async def run(stop: asyncio.Event) -> None:
     # OBI diverjans/isabet olcumu (islemsiz) — edge var mi ampirik.
     meter = SignalMeter(sample_at_sec=int(os.getenv("SIGNAL_SAMPLE_SEC", "90")),
                         strong=obi_entry)
+    # Perp vs Spot OBI kiyas olcumu (islemsiz) — derinlik sinyali hangi defterde daha iyi?
+    obicmp = ObiCompareMeter(sample_at_sec=int(os.getenv("SIGNAL_SAMPLE_SEC", "90")))
     # STRADDLE olcumu (islemsiz) — cift-limit UP@.25/DOWN@.25 kararsiz bolgede +EV mi?
     _buckets = tuple(float(x) for x in
                      os.getenv("STRADDLE_MAKAS_BUCKETS", "5,10,20,40").split(","))
@@ -133,6 +151,8 @@ async def run(stop: asyncio.Event) -> None:
     last_dir = ""          # sinyal spam onleme: son yon
     last_emit_ms = 0.0     # son sinyal zamani
     obi_ema = 0.0          # yumusatilmis OBI (order book imbalance)
+    obi_perp_ema = 0.0     # perp grubu OBI (olcum; trader'i etkilemez)
+    obi_spot_ema = 0.0     # spot grubu OBI (olcum)
     cur_win = -1           # aktif 5dk pencere indeksi
     spot_open = 0.0        # pencere acilisinda bizim spot fiyat (tutarli hareket referansi)
 
@@ -185,6 +205,12 @@ async def run(stop: asyncio.Event) -> None:
             ask_vols = np.array([q["ask_vol"] for q in fresh], dtype=np.float64)
             obi = compute_obi(bid_vols, ask_vols)
             obi_ema = obi_alpha * obi + (1.0 - obi_alpha) * obi_ema  # yumusatma (gurultu ↓)
+
+            # --- PERP vs SPOT OBI (olcum; trader'in obi_ema'sini ETKILEMEZ) ---
+            obi_perp = _group_obi(quotes, perp_obi_srcs, now_ms, quote_ttl_ms)
+            obi_spot = _group_obi(quotes, spot_obi_srcs, now_ms, quote_ttl_ms)
+            obi_perp_ema = obi_alpha * obi_perp + (1.0 - obi_alpha) * obi_perp_ema
+            obi_spot_ema = obi_alpha * obi_spot + (1.0 - obi_alpha) * obi_spot_ema
 
             # --- PIYASA REFERANSI (spot): sadece USD-spot borsalar (Coinbase/Kraken) ---
             # Chainlink/Polymarket'in kullandigi spot fiyata en yakin; perp primi yok.
@@ -254,6 +280,7 @@ async def run(stop: asyncio.Event) -> None:
             poly_up_win = poly.for_window(win_ts, max_stale_ms=3000)
             trader.update(win_ts, now_sec, obi_ema, poly_up_win, spot_ref, strike, p2b.closed)
             meter.update(win_ts, now_sec, obi_ema, poly_up_win, p2b.closed)
+            obicmp.update(win_ts, now_sec, obi_perp_ema, obi_spot_ema, obi_ema, p2b.closed)
             # STRADDLE olcumu (additive, izole): canli Chainlink BTC taze ise onu, degilse spot.
             cl_price, cl_fresh = chainlink.snapshot()
             btc_ref = cl_price if cl_fresh else spot_ref
@@ -287,6 +314,8 @@ async def run(stop: asyncio.Event) -> None:
                     await consumer.client.xadd("stream:measure", meter.snapshot(),
                                                maxlen=10, approximate=True)
                     await consumer.client.xadd("stream:straddle", straddle.snapshot(),
+                                               maxlen=10, approximate=True)
+                    await consumer.client.xadd("stream:obicmp", obicmp.snapshot(),
                                                maxlen=10, approximate=True)
                 except Exception as exc:
                     log.error("[PNL] xadd hatasi: %s", exc)

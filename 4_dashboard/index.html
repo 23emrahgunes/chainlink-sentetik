@@ -92,6 +92,37 @@
     </div>
   </section>
 
+  <!-- PERP vs SPOT OBI (işlemsiz — derinlik sinyali hangi defterde daha iyi?) -->
+  <section class="card rounded-xl border border-fuchsia-800/40 p-5 mb-6 shadow-xl">
+    <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-1">
+      Perp vs Spot OBI <span class="text-slate-600 normal-case tracking-normal">(vadeli defter mi, spot defter mi daha iyi tahmin ediyor?)</span>
+    </h2>
+    <p class="text-[11px] text-slate-600 mb-4">
+      Perp = Binance(20 sv)+Bybit · Spot = Coinbase+Kraken+OKX · Mix = trader'ın kullandığı (referans).
+      Perp belirgin üstünse → vadeli defterine yatırım mantıklı.
+    </p>
+    <div class="grid grid-cols-3 gap-4" x-data="{ col: h => h>=55?'text-emerald-400':h>0&&h<45?'text-rose-400':'text-slate-300' }">
+      <div>
+        <p class="text-[11px] uppercase tracking-widest text-fuchsia-400/80">Perp OBI isabet</p>
+        <p class="text-3xl font-bold tabular-nums" :class="col(perpHit)"
+           x-text="cmpN>0 ? perpHit + '%' : '—'"></p>
+        <p class="text-[11px] text-slate-600" x-text="cmpN + ' pencere · vadeli'"></p>
+      </div>
+      <div>
+        <p class="text-[11px] uppercase tracking-widest text-cyan-400/80">Spot OBI isabet</p>
+        <p class="text-3xl font-bold tabular-nums" :class="col(spotHit)"
+           x-text="cmpN>0 ? spotHit + '%' : '—'"></p>
+        <p class="text-[11px] text-slate-600" x-text="cmpN + ' pencere · spot'"></p>
+      </div>
+      <div>
+        <p class="text-[11px] uppercase tracking-widest text-slate-500">Mix OBI (referans)</p>
+        <p class="text-3xl font-bold tabular-nums" :class="col(mixHit)"
+           x-text="cmpN>0 ? mixHit + '%' : '—'"></p>
+        <p class="text-[11px] text-slate-600" x-text="cmpN + ' pencere · karma'"></p>
+      </div>
+    </div>
+  </section>
+
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <!-- Kutu 1: Son 5 Sinyal -->
     <section class="card lg:col-span-2 rounded-xl border border-slate-800 p-5 shadow-xl">
@@ -457,6 +488,7 @@
         tradesList: [],       // islem gecmisi
         page: 1, pageSize: 20, // sayfalama (20/sayfa)
         obiHit: 0, obiN: 0, strongHit: 0, strongN: 0, contraHit: 0, contraN: 0, // OBI olcum
+        perpHit: 0, spotHit: 0, mixHit: 0, cmpN: 0, // perp vs spot OBI kiyas
         get totalPages() { return Math.max(1, Math.ceil(this.tradesList.length / this.pageSize)); },
         get pagedTrades() {
           if (this.page > this.totalPages) this.page = this.totalPages; // liste kuculurse sabitle
@@ -547,6 +579,12 @@
             this.obiHit = Number(d.obi_hit); this.obiN = Number(d.obi_n);
             this.strongHit = Number(d.strong_hit); this.strongN = Number(d.strong_n);
             this.contraHit = Number(d.contra_hit); this.contraN = Number(d.contra_n);
+            return;
+          }
+
+          if (msg.type === 'obicmp') {            // perp vs spot OBI kiyas
+            this.perpHit = Number(d.perp_hit); this.spotHit = Number(d.spot_hit);
+            this.mixHit = Number(d.mix_hit); this.cmpN = Number(d.perp_n);
             return;
           }
 
