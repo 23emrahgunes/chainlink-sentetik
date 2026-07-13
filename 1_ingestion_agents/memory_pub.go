@@ -15,6 +15,7 @@ const (
 	StreamDEX       = "stream:dex_mempool"
 	StreamPoly      = "stream:polymarket"
 	StreamChainlink = "stream:chainlink"
+	StreamWhale     = "stream:whale" // Binance aggTrade akisi (CVD/balina)
 
 	// KISIT: Banana Pi 2GB — her stream'de en fazla ~10 kayit tutulur.
 	streamMaxLen = 10

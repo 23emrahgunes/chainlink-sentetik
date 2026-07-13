@@ -19,7 +19,7 @@ import logging
 log = logging.getLogger("brain.obicmp")
 
 WINDOW_SEC = 300
-KINDS = ("perp", "spot", "mix")
+KINDS = ("perp", "spot", "mix", "whale")   # whale = balina CVD (agresif akis)
 
 
 class ObiCompareMeter:
@@ -31,10 +31,11 @@ class ObiCompareMeter:
 
     def update(self, win_ts: int, now_sec: int,
                obi_perp: float, obi_spot: float, obi_mix: float,
-               closed: dict) -> None:
+               whale: float, closed: dict) -> None:
         self._settle(closed)
         if win_ts not in self.pending and (now_sec - win_ts) >= self.sample_at:
-            self.pending[win_ts] = {"perp": obi_perp, "spot": obi_spot, "mix": obi_mix}
+            self.pending[win_ts] = {"perp": obi_perp, "spot": obi_spot,
+                                    "mix": obi_mix, "whale": whale}
 
     def _settle(self, closed: dict) -> None:
         done = []
@@ -49,9 +50,9 @@ class ObiCompareMeter:
                 self.stats[k][1] += 1
                 self.stats[k][0] += 1 if d == outcome else 0
             self.last = {"win": w, "outcome": outcome, **rec}
-            log.info("[OBICMP] pencere %d sonuc=%s | perp=%+.3f spot=%+.3f mix=%+.3f",
+            log.info("[OBICMP] pencere %d sonuc=%s | perp=%+.3f spot=%+.3f mix=%+.3f whale=%+.3f",
                      w, "UP" if outcome > 0 else "DOWN",
-                     rec["perp"], rec["spot"], rec["mix"])
+                     rec["perp"], rec["spot"], rec["mix"], rec["whale"])
             done.append(w)
         for w in done:
             del self.pending[w]
@@ -75,20 +76,22 @@ if __name__ == "__main__":
     #   win 1000: sonuc UP  (close>open). perp=+ (dogru), spot=- (yanlis), mix=+
     #   win 1300: sonuc DOWN.            perp=- (dogru), spot=+ (yanlis), mix=-
     #   win 1600: sonuc UP.             perp=+ (dogru), spot=- (yanlis), mix=+
+    # (win, perp, spot, mix, whale, open, close)
     cases = [
-        (1000, +0.5, -0.5, +0.3, 64000.0, 64010.0),  # UP
-        (1300, -0.5, +0.5, -0.3, 64000.0, 63990.0),  # DOWN
-        (1600, +0.5, -0.5, +0.3, 64000.0, 64010.0),  # UP
+        (1000, +0.5, -0.5, +0.3, +0.5, 64000.0, 64010.0),  # UP
+        (1300, -0.5, +0.5, -0.3, -0.5, 64000.0, 63990.0),  # DOWN
+        (1600, +0.5, -0.5, +0.3, +0.5, 64000.0, 64010.0),  # UP
     ]
     closed = {}
-    for w, p, s, mix, o, c in cases:
-        m.update(w, w + 95, p, s, mix, closed)        # ornekle (sample_at=90)
+    for w, p, s, mix, wh, o, c in cases:
+        m.update(w, w + 95, p, s, mix, wh, closed)    # ornekle (sample_at=90)
         closed[w + WINDOW_SEC] = (o, c)
     # settle-only tur: sec_in=0 (ornek eklemez), sadece pending'i sonuclarla kapatir
-    m.update(999999, 999999, 0, 0, 0, closed)
+    m.update(999999, 999999, 0, 0, 0, 0, closed)
     snap = m.snapshot()
     print("snapshot:", snap)
     assert snap["perp_hit"] == "100.0", snap
     assert snap["spot_hit"] == "0.0", snap
+    assert snap["whale_hit"] == "100.0", snap
     assert snap["perp_n"] == "3", snap
     print("OBICMP ASSERT GECTI [OK]")

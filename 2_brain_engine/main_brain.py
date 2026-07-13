@@ -29,6 +29,7 @@ from pricetobeat_feed import PriceToBeatFeed
 from signal_meter import SignalMeter
 from straddle_meter import StraddleMeter
 from obi_compare_meter import ObiCompareMeter
+from whale_feed import WhaleFeed
 from redis_consumer import RedisConsumer
 from usdt_feed import UsdtUsdFeed
 from synthetic_oracle import compute_pcex
@@ -108,6 +109,11 @@ async def run(stop: asyncio.Event) -> None:
     # Polymarket RTDS: gercek canli Chainlink BTC/USD (market'in cozuldugu fiyat).
     chainlink = ChainlinkFeed(consumer.client)
     chainlink_task = asyncio.ensure_future(chainlink.run(stop))
+    # Balina/akis (Binance aggTrade): agresif alim/satim + CVD (balina defterde degil burada).
+    whale = WhaleFeed(consumer.client,
+                      window_sec=int(os.getenv("WHALE_WINDOW_SEC", "30")),
+                      whale_min_btc=float(os.getenv("WHALE_MIN_BTC", "5.0")))
+    whale_task = asyncio.ensure_future(whale.run(stop))
     # DEX akisi (Uniswap V3 WBTC, GeckoTerminal) — alim/satim baskisi + likidite.
     dex = DexFeed(network=os.getenv("DEX_NETWORK", "arbitrum"),
                   pool=os.getenv("DEX_POOL", "0x0e4831319a50228b9e450861297ab92dee15b44f"),
@@ -252,17 +258,16 @@ async def run(stop: asyncio.Event) -> None:
             if now_ms - last_synth_pub >= 300:
                 last_synth_pub = now_ms
                 try:
-                    await consumer.client.xadd(
-                        "stream:synthetic",
-                        {"p_cex": f"{p_cex:.4f}", "spot_ref": f"{spot_ref:.4f}",
-                         "sources": str(n_src), "strike": f"{strike:.2f}",
-                         "obi": f"{obi_ema:.4f}", "usdt": f"{usdt.rate:.5f}",
-                         "chainlink": f"{chainlink.price:.2f}",
-                         "dex_flow": f"{dex.flow:.4f}", "dex_price": f"{dex.price:.2f}",
-                         "dex_liq": f"{dex.liquidity:.0f}", "dex_buys": str(dex.buys),
-                         "dex_sells": str(dex.sells), "ts": str(int(now_ms))},
-                        maxlen=10, approximate=True,
-                    )
+                    synth = {"p_cex": f"{p_cex:.4f}", "spot_ref": f"{spot_ref:.4f}",
+                             "sources": str(n_src), "strike": f"{strike:.2f}",
+                             "obi": f"{obi_ema:.4f}", "usdt": f"{usdt.rate:.5f}",
+                             "chainlink": f"{chainlink.price:.2f}",
+                             "dex_flow": f"{dex.flow:.4f}", "dex_price": f"{dex.price:.2f}",
+                             "dex_liq": f"{dex.liquidity:.0f}", "dex_buys": str(dex.buys),
+                             "dex_sells": str(dex.sells), "ts": str(int(now_ms))}
+                    synth.update(whale.snapshot(now_ms))  # canli balina/akis alanlari
+                    await consumer.client.xadd("stream:synthetic", synth,
+                                               maxlen=10, approximate=True)
                 except Exception as exc:
                     log.error("[SYNTH] xadd hatasi: %s", exc)
 
@@ -280,7 +285,8 @@ async def run(stop: asyncio.Event) -> None:
             poly_up_win = poly.for_window(win_ts, max_stale_ms=3000)
             trader.update(win_ts, now_sec, obi_ema, poly_up_win, spot_ref, strike, p2b.closed)
             meter.update(win_ts, now_sec, obi_ema, poly_up_win, p2b.closed)
-            obicmp.update(win_ts, now_sec, obi_perp_ema, obi_spot_ema, obi_ema, p2b.closed)
+            obicmp.update(win_ts, now_sec, obi_perp_ema, obi_spot_ema, obi_ema,
+                          whale.signal(now_ms), p2b.closed)
             # STRADDLE olcumu (additive, izole): canli Chainlink BTC taze ise onu, degilse spot.
             cl_price, cl_fresh = chainlink.snapshot()
             btc_ref = cl_price if cl_fresh else spot_ref
@@ -324,6 +330,7 @@ async def run(stop: asyncio.Event) -> None:
         p2b_task.cancel()
         usdt_task.cancel()
         chainlink_task.cancel()
+        whale_task.cancel()
         dex_task.cancel()
         await stream.aclose()
         await consumer.close()

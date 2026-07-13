@@ -37,6 +37,7 @@ func main() {
 	dexURL := getenv("POLYGON_WSS", "wss://polygon-bor-rpc.publicnode.com")
 	polyURL := getenv("POLYMARKET_WSS", "wss://ws-subscriptions-clob.polymarket.com/ws/market")
 	polyToken := getenv("POLYMARKET_TOKEN_ID", "")
+	whaleURL := getenv("WHALE_WSS", "wss://fstream.binance.com/ws/btcusdt@aggTrade")
 
 	// 5 CEX adapter'i (.env'den URL, bos ise RunCEX atlar).
 	cexAdapters := []CEXAdapter{
@@ -68,14 +69,15 @@ func main() {
 
 	// --- Ajanlari baslat ---
 	var wg sync.WaitGroup
-	wg.Add(len(cexAdapters) + 3) // 5 CEX + DEX + Polymarket + Chainlink RTDS
+	wg.Add(len(cexAdapters) + 4) // 5 CEX + DEX + Polymarket + Chainlink RTDS + Whale
 	for _, a := range cexAdapters {
 		go RunCEX(rootCtx, &wg, pub, a)
 	}
 	go RunDEXAgent(rootCtx, &wg, pub, dexURL)
 	go RunPolymarketAgent(rootCtx, &wg, pub, polyURL, polyToken)
 	go RunChainlinkRTDS(rootCtx, &wg, pub)
-	log.Printf("[MAIN] %d CEX + DEX + Polymarket + Chainlink RTDS calisiyor. Ctrl+C ile durdur.", len(cexAdapters))
+	go RunWhaleAgent(rootCtx, &wg, pub, whaleURL)
+	log.Printf("[MAIN] %d CEX + DEX + Polymarket + Chainlink RTDS + Whale calisiyor. Ctrl+C ile durdur.", len(cexAdapters))
 
 	// --- Graceful Shutdown ---
 	sig := make(chan os.Signal, 1)

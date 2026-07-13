@@ -101,7 +101,13 @@
       Perp = Binance(20 sv)+Bybit · Spot = Coinbase+Kraken+OKX · Mix = trader'ın kullandığı (referans).
       Perp belirgin üstünse → vadeli defterine yatırım mantıklı.
     </p>
-    <div class="grid grid-cols-3 gap-4" x-data="{ col: h => h>=55?'text-emerald-400':h>0&&h<45?'text-rose-400':'text-slate-300' }">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4" x-data="{ col: h => h>=55?'text-emerald-400':h>0&&h<45?'text-rose-400':'text-slate-300' }">
+      <div>
+        <p class="text-[11px] uppercase tracking-widest text-amber-400/80">🐋 Balina (CVD) isabet</p>
+        <p class="text-3xl font-bold tabular-nums" :class="col(whaleHit)"
+           x-text="cmpN>0 ? whaleHit + '%' : '—'"></p>
+        <p class="text-[11px] text-slate-600" x-text="cmpN + ' pencere · akış'"></p>
+      </div>
       <div>
         <p class="text-[11px] uppercase tracking-widest text-fuchsia-400/80">Perp OBI isabet</p>
         <p class="text-3xl font-bold tabular-nums" :class="col(perpHit)"
@@ -119,6 +125,44 @@
         <p class="text-3xl font-bold tabular-nums" :class="col(mixHit)"
            x-text="cmpN>0 ? mixHit + '%' : '—'"></p>
         <p class="text-[11px] text-slate-600" x-text="cmpN + ' pencere · karma'"></p>
+      </div>
+    </div>
+    <p class="text-[11px] text-slate-600 mt-3">
+      🐋 Balina = Binance aggTrade agresif alım−satım (CVD). Dönüşü YARATAN akış — durağan defter değil.
+    </p>
+  </section>
+
+  <!-- CANLI BALINA / AKIŞ (Binance aggTrade) -->
+  <section class="card rounded-xl border border-amber-800/40 p-5 mb-6 shadow-xl">
+    <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-1">
+      🐋 Canlı Balina / Akış
+      <span class="text-slate-600 normal-case tracking-normal" x-text="'(son ' + 30 + 's agresif işlem · Binance perp)'"></span>
+    </h2>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-3">
+      <div>
+        <p class="text-[11px] uppercase tracking-widest text-slate-500">CVD (net baskı)</p>
+        <p class="text-2xl font-bold tabular-nums"
+           :class="whaleCvd > 0 ? 'text-emerald-400' : whaleCvd < 0 ? 'text-rose-400' : 'text-slate-300'"
+           x-text="(whaleCvd>=0?'+':'') + whaleCvd.toFixed(2) + ' ₿'"></p>
+        <p class="text-[11px] text-slate-600" x-text="whaleCvd>=0 ? 'alım baskın' : 'satım baskın'"></p>
+      </div>
+      <div>
+        <p class="text-[11px] uppercase tracking-widest text-slate-500">Son balina</p>
+        <p class="text-2xl font-bold tabular-nums"
+           :class="whaleSide==='BUY' ? 'text-emerald-400' : whaleSide==='SELL' ? 'text-rose-400' : 'text-slate-500'"
+           x-text="whaleSide==='-' ? '—' : (whaleSide==='BUY'?'▲ ':'▼ ') + whaleMax.toFixed(2) + ' ₿'"></p>
+        <p class="text-[11px] text-slate-600" x-text="whaleSide==='-' ? 'eşik altı' : (whaleSide==='BUY'?'ALIM balinası':'SATIM balinası')"></p>
+      </div>
+      <div class="lg:col-span-2">
+        <p class="text-[11px] uppercase tracking-widest text-slate-500 mb-1">Alım / Satım baskısı</p>
+        <div class="h-4 rounded-full overflow-hidden bg-rose-500/30 flex mt-2">
+          <div class="bg-emerald-500 h-full transition-all" :style="'width:' + (whalePressure*100).toFixed(1) + '%'"></div>
+        </div>
+        <div class="flex justify-between text-[11px] mt-1">
+          <span class="text-emerald-400" x-text="'alım ' + whaleBuy.toFixed(1) + ' ₿'"></span>
+          <span class="text-slate-500" x-text="(whalePressure*100).toFixed(0) + '% alım'"></span>
+          <span class="text-rose-400" x-text="'satım ' + whaleSell.toFixed(1) + ' ₿'"></span>
+        </div>
       </div>
     </div>
   </section>
@@ -488,7 +532,9 @@
         tradesList: [],       // islem gecmisi
         page: 1, pageSize: 20, // sayfalama (20/sayfa)
         obiHit: 0, obiN: 0, strongHit: 0, strongN: 0, contraHit: 0, contraN: 0, // OBI olcum
-        perpHit: 0, spotHit: 0, mixHit: 0, cmpN: 0, // perp vs spot OBI kiyas
+        perpHit: 0, spotHit: 0, mixHit: 0, whaleHit: 0, cmpN: 0, // perp/spot/balina OBI kiyas
+        whaleCvd: 0, whaleBuy: 0, whaleSell: 0, whalePressure: 0.5, // canli balina/akis
+        whaleMax: 0, whaleSide: '-',
         get totalPages() { return Math.max(1, Math.ceil(this.tradesList.length / this.pageSize)); },
         get pagedTrades() {
           if (this.page > this.totalPages) this.page = this.totalPages; // liste kuculurse sabitle
@@ -567,6 +613,12 @@
             if (d.dex_liq) this.dexLiq = Number(d.dex_liq);
             if (d.dex_buys) this.dexBuys = Number(d.dex_buys);
             if (d.dex_sells) this.dexSells = Number(d.dex_sells);
+            if (d.whale_cvd !== undefined) this.whaleCvd = Number(d.whale_cvd);
+            if (d.whale_buy !== undefined) this.whaleBuy = Number(d.whale_buy);
+            if (d.whale_sell !== undefined) this.whaleSell = Number(d.whale_sell);
+            if (d.whale_pressure !== undefined) this.whalePressure = Number(d.whale_pressure);
+            if (d.whale_max !== undefined) this.whaleMax = Number(d.whale_max);
+            if (d.whale_side !== undefined) this.whaleSide = d.whale_side;
             return;
           }
           if (msg.type === 'poly') {              // Polymarket YES fiyati (0..1)
@@ -582,9 +634,10 @@
             return;
           }
 
-          if (msg.type === 'obicmp') {            // perp vs spot OBI kiyas
+          if (msg.type === 'obicmp') {            // perp/spot/balina OBI kiyas
             this.perpHit = Number(d.perp_hit); this.spotHit = Number(d.spot_hit);
-            this.mixHit = Number(d.mix_hit); this.cmpN = Number(d.perp_n);
+            this.mixHit = Number(d.mix_hit); this.whaleHit = Number(d.whale_hit);
+            this.cmpN = Number(d.perp_n);
             return;
           }
 
