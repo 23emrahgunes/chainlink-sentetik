@@ -273,6 +273,9 @@ async def run(stop: asyncio.Event) -> None:
                         "profit": f"{rec['profit']:.4f}",
                         "entry": f"{rec['entry']:.4f}",
                         "pnl_after": f"{rec['pnl_after']:.4f}",
+                        "margin": f"{rec.get('margin', -1.0):.2f}",     # giris baglami ($)
+                        "obi": f"{rec.get('obi', 0.0):.4f}",
+                        "sec_left": str(rec.get('sec_left', -1)),
                     }, maxlen=500, approximate=True)
                 except Exception as exc:
                     log.error("[TRADES] xadd hatasi: %s", exc)

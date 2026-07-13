@@ -86,6 +86,10 @@ class PaperTrader:
                 slot["locked"] = True
                 slot["dir"] = "LONG" if cheap_dir == 1 else "SHORT"
                 slot["entry_price"] = cheap_price
+                # TESHIS (filtreyi DEGISTIRMEZ): giris anindaki baglam.
+                slot["entry_margin"] = abs(spot - strike)      # USD
+                slot["entry_obi"] = obi
+                slot["entry_sec_left"] = WINDOW_SEC - sec_in
                 log.info("[PAPER] REVERSAL GIRIS %s @ %.3f | OBI=%+.3f margin=%%%.4f kalan=%ds",
                          "UP" if cheap_dir == 1 else "DOWN", cheap_price, obi,
                          margin * 100, WINDOW_SEC - sec_in)
@@ -99,6 +103,9 @@ class PaperTrader:
                     price = poly_up if direction == "LONG" else (1.0 - poly_up)
                     if self.min_entry <= price <= self.value_max:
                         slot["dir"], slot["entry_price"] = direction, price
+                        slot["entry_margin"] = abs(spot - strike) if strike > 0 else -1.0
+                        slot["entry_obi"] = obi
+                        slot["entry_sec_left"] = WINDOW_SEC - sec_in
                         log.info("[PAPER] OBI GIRIS %s @ %.3f (OBI=%+.3f)",
                                  "UP" if direction == "LONG" else "DOWN", price, obi)
                     else:
@@ -126,6 +133,9 @@ class PaperTrader:
             rec = {
                 "win": w, "dir": tr["dir"], "outcome": outcome,
                 "won": won, "profit": profit, "entry": p, "pnl_after": self.pnl,
+                "margin": tr.get("entry_margin", -1.0),   # giris baglami (teshis)
+                "obi": tr.get("entry_obi", 0.0),
+                "sec_left": tr.get("entry_sec_left", -1),
             }
             self.last = rec
             self._to_publish.append(rec)
