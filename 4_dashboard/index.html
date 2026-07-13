@@ -389,6 +389,9 @@
           <span class="text-right text-slate-200" x-text="ctxWon.margin!==null ? '$'+ctxWon.margin.toFixed(1) : '—'"></span>
           <span class="text-slate-500">Ort. |OBI|</span>
           <span class="text-right text-slate-200" x-text="ctxWon.obi!==null ? ctxWon.obi.toFixed(3) : '—'"></span>
+          <span class="text-slate-500">🐋 Ort. balina CVD</span>
+          <span class="text-right" :class="ctxWon.whale>0?'text-emerald-300':ctxWon.whale<0?'text-rose-300':'text-slate-200'"
+                x-text="ctxWon.whale!==null ? (ctxWon.whale>=0?'+':'')+ctxWon.whale.toFixed(2)+' ₿' : '—'"></span>
           <span class="text-slate-500">Ort. kalan sn</span>
           <span class="text-right text-slate-200" x-text="ctxWon.sec!==null ? ctxWon.sec.toFixed(0)+'s' : '—'"></span>
         </div>
@@ -403,6 +406,9 @@
           <span class="text-right text-slate-200" x-text="ctxLost.margin!==null ? '$'+ctxLost.margin.toFixed(1) : '—'"></span>
           <span class="text-slate-500">Ort. |OBI|</span>
           <span class="text-right text-slate-200" x-text="ctxLost.obi!==null ? ctxLost.obi.toFixed(3) : '—'"></span>
+          <span class="text-slate-500">🐋 Ort. balina CVD</span>
+          <span class="text-right" :class="ctxLost.whale>0?'text-emerald-300':ctxLost.whale<0?'text-rose-300':'text-slate-200'"
+                x-text="ctxLost.whale!==null ? (ctxLost.whale>=0?'+':'')+ctxLost.whale.toFixed(2)+' ₿' : '—'"></span>
           <span class="text-slate-500">Ort. kalan sn</span>
           <span class="text-right text-slate-200" x-text="ctxLost.sec!==null ? ctxLost.sec.toFixed(0)+'s' : '—'"></span>
         </div>
@@ -552,6 +558,7 @@
             entry: this._avg(arr, t => t.entry),
             margin: this._avg(arr, t => t.margin),
             obi: this._avg(arr, t => t.obi !== null ? Math.abs(t.obi) : null),
+            whale: this._avg(arr, t => t.whale),
             sec: this._avg(arr, t => t.secLeft)
           };
         },
@@ -654,6 +661,7 @@
                 profit: Number(d.profit), pnl_after: Number(d.pnl_after),
                 margin: d.margin !== undefined ? Number(d.margin) : null,   // giris baglami
                 obi: d.obi !== undefined ? Number(d.obi) : null,
+                whale: d.whale !== undefined ? Number(d.whale) : null,
                 secLeft: d.sec_left !== undefined ? Number(d.sec_left) : null
               });
               if (this.tradesList.length > 500) this.tradesList.pop();

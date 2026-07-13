@@ -45,7 +45,7 @@ class PaperTrader:
         self._to_publish: list[dict] = []     # yeni settle edilenler (stream:trades icin)
 
     def update(self, win_ts: int, now_sec: int, obi: float, poly_up: float,
-               spot: float, strike: float, closed: dict) -> None:
+               spot: float, strike: float, closed: dict, whale: float = 0.0) -> None:
         # 1) settle
         self._settle_pending(closed)
 
@@ -89,6 +89,7 @@ class PaperTrader:
                 # TESHIS (filtreyi DEGISTIRMEZ): giris anindaki baglam.
                 slot["entry_margin"] = abs(spot - strike)      # USD
                 slot["entry_obi"] = obi
+                slot["entry_whale"] = whale                    # balina CVD (giris ani)
                 slot["entry_sec_left"] = WINDOW_SEC - sec_in
                 log.info("[PAPER] REVERSAL GIRIS %s @ %.3f | OBI=%+.3f margin=%%%.4f kalan=%ds",
                          "UP" if cheap_dir == 1 else "DOWN", cheap_price, obi,
@@ -105,6 +106,7 @@ class PaperTrader:
                         slot["dir"], slot["entry_price"] = direction, price
                         slot["entry_margin"] = abs(spot - strike) if strike > 0 else -1.0
                         slot["entry_obi"] = obi
+                        slot["entry_whale"] = whale
                         slot["entry_sec_left"] = WINDOW_SEC - sec_in
                         log.info("[PAPER] OBI GIRIS %s @ %.3f (OBI=%+.3f)",
                                  "UP" if direction == "LONG" else "DOWN", price, obi)
@@ -135,6 +137,7 @@ class PaperTrader:
                 "won": won, "profit": profit, "entry": p, "pnl_after": self.pnl,
                 "margin": tr.get("entry_margin", -1.0),   # giris baglami (teshis)
                 "obi": tr.get("entry_obi", 0.0),
+                "whale": tr.get("entry_whale", 0.0),
                 "sec_left": tr.get("entry_sec_left", -1),
             }
             self.last = rec

@@ -283,7 +283,8 @@ async def run(stop: asyncio.Event) -> None:
             now_sec = int(now_ms // 1000)
             # Sadece AKTIF pencereye ait oran (rollover bayat/uc oran sizmasin).
             poly_up_win = poly.for_window(win_ts, max_stale_ms=3000)
-            trader.update(win_ts, now_sec, obi_ema, poly_up_win, spot_ref, strike, p2b.closed)
+            trader.update(win_ts, now_sec, obi_ema, poly_up_win, spot_ref, strike,
+                          p2b.closed, whale=whale.signal(now_ms))
             meter.update(win_ts, now_sec, obi_ema, poly_up_win, p2b.closed)
             obicmp.update(win_ts, now_sec, obi_perp_ema, obi_spot_ema, obi_ema,
                           whale.signal(now_ms), p2b.closed)
@@ -308,6 +309,7 @@ async def run(stop: asyncio.Event) -> None:
                         "pnl_after": f"{rec['pnl_after']:.4f}",
                         "margin": f"{rec.get('margin', -1.0):.2f}",     # giris baglami ($)
                         "obi": f"{rec.get('obi', 0.0):.4f}",
+                        "whale": f"{rec.get('whale', 0.0):.3f}",
                         "sec_left": str(rec.get('sec_left', -1)),
                     }, maxlen=500, approximate=True)
                 except Exception as exc:
