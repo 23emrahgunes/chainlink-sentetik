@@ -221,9 +221,13 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
                  direction, order_price, resp)
         await _emit_execution(cfg, direction, target, "LIVE_SENT", decision, gas, "order submitted")
     except asyncio.TimeoutError:
-        log.error("LIVE: CLOB %ss icinde yanit vermedi — TIMEOUT.", cfg["tx_timeout"])
+        reason = f"CLOB timeout {cfg['tx_timeout']}s"
+        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason)
+        log.error("LIVE: %s.", reason)
     except Exception as exc:
-        log.error("LIVE: CLOB emir hatasi: %s", exc)
+        reason = f"CLOB emir hatasi: {exc}"
+        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason)
+        log.error("LIVE: %s", reason)
 
 
 async def run(stop: asyncio.Event) -> None:
