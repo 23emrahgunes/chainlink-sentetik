@@ -107,6 +107,73 @@ redis_cli() {
   fi
 }
 
+random_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -base64 24 | tr -d '\n'
+  else
+    python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(24), end='')
+PY
+  fi
+}
+
+set_env_kv() {
+  local key="$1"
+  local value="$2"
+  local file="$ROOT/.env"
+  touch "$file"
+  chmod 600 "$file" 2>/dev/null || true
+  if grep -q "^${key}=" "$file"; then
+    python3 - "$file" "$key" "$value" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+key = sys.argv[2]
+value = sys.argv[3]
+lines = path.read_text(encoding='utf-8').splitlines()
+for i, line in enumerate(lines):
+    if line.startswith(key + '='):
+        lines[i] = f'{key}={value}'
+        break
+path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+PY
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+  fi
+}
+
+get_env_kv() {
+  local key="$1"
+  local file="$ROOT/.env"
+  [ -f "$file" ] || return 1
+  grep -E "^${key}=" "$file" | tail -n 1 | cut -d= -f2-
+}
+
+ensure_dashboard_auth() {
+  local user pass generated
+  user="$(get_env_kv DASHBOARD_USER || true)"
+  pass="$(get_env_kv DASHBOARD_PASS || true)"
+  generated=0
+  if [ -z "$user" ]; then
+    user="admin"
+    set_env_kv DASHBOARD_USER "$user"
+  fi
+  if [ -z "$pass" ]; then
+    pass="$(random_secret)"
+    set_env_kv DASHBOARD_PASS "$pass"
+    generated=1
+  fi
+  log "Dashboard auth"
+  echo "User: $user"
+  if [ "$generated" -eq 1 ]; then
+    echo "Password generated and saved to $ROOT/.env"
+    echo "Password: $pass"
+  else
+    echo "Password: configured in $ROOT/.env"
+  fi
+}
+
 print_status() {
   log "Docker Redis"
   docker ps --filter "name=$REDIS_CONTAINER" --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
@@ -190,6 +257,8 @@ if [ "$DO_INSTALL" -eq 1 ]; then
     fi
   done
 fi
+
+ensure_dashboard_auth
 
 log "Building Go ingestion"
 ( cd "$ROOT/1_ingestion_agents" && go mod tidy && go build -o ghost-ingestion . )
