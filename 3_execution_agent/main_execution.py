@@ -40,16 +40,116 @@ log = logging.getLogger("exec.main")
 STREAM_SIGNALS = "stream:signals"
 STREAM_EXECUTIONS = "stream:executions"
 STREAM_POLY = "stream:polymarket"
+LIVE_STATE_KEY = "state:live"
+RISK_STATE_KEY = "state:risk"
 BLOCK_MS = 1000
 # Bayat sinyal koruması: bundan eski karar uygulanmaz.
-SIGNAL_MAX_STALE_MS = 2000
+SIGNAL_MAX_STALE_MS = int(os.getenv("SIGNAL_MAX_STALE_MS", "2000"))
 
+
+
+def _truthy(value) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "live"}
+
+
+def _env_float(*names: str, default: float = 0.0) -> float:
+    for name in names:
+        value = os.getenv(name)
+        if value not in (None, ""):
+            try:
+                return float(value)
+            except ValueError:
+                return default
+    return default
+
+
+def _env_int(name: str, default: int = 0) -> int:
+    try:
+        return int(float(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+async def _emit_execution(cfg: dict, direction: str, target: float, karar: str,
+                          decision=None, gas=None, reason: str = "") -> None:
+    fields = {
+        "dir": direction,
+        "p_cex": f"{target:.8f}",
+        "karar": karar,
+        "reason": reason,
+        "mode": cfg.get("mode", "DRY_RUN"),
+        "live_armed": "1" if cfg.get("live_armed") else "0",
+        "ts": str(int(time.time() * 1000)),
+    }
+    if decision is not None:
+        fields["slippage"] = f"{decision.slippage:.6f}"
+    if gas is not None:
+        fields["gas_gwei"] = f"{gwei(gas['maxFeePerGas']):.1f}"
+    try:
+        await cfg["client"].xadd(STREAM_EXECUTIONS, fields, maxlen=20, approximate=True)
+    except Exception as exc:
+        log.error("[EXEC] stream:executions XADD hatasi: %s", exc)
+
+
+async def _runtime_live_armed(client, env_default: bool) -> bool:
+    try:
+        state = await client.hgetall(LIVE_STATE_KEY)
+        if state and "armed" in state:
+            return _truthy(state.get("armed"))
+    except Exception:
+        pass
+    return env_default
+
+
+async def _runtime_risk_state(client) -> dict:
+    try:
+        state = await client.hgetall(RISK_STATE_KEY) or {}
+    except Exception:
+        state = {}
+
+    def f(key: str, env_key: str, default: float = 0.0) -> float:
+        raw = state.get(key, os.getenv(env_key, str(default)))
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        "daily_loss_usdc": f("daily_loss_usdc", "DAILY_LOSS_USDC", 0.0),
+        "open_positions": int(f("open_positions", "OPEN_POSITIONS", 0.0)),
+    }
+
+
+def _live_block_reason(cfg: dict, decision, router, pm_mid, risk: dict) -> str | None:
+    if cfg.get("mode") != "LIVE":
+        return None
+    if not cfg.get("live_armed"):
+        return "LIVE_ARMED=0"
+    if not decision.approved:
+        return f"slippage red: {decision.reason}"
+    if cfg["order_usdc"] > cfg["max_order_usdc"]:
+        return f"ORDER_USDC {cfg['order_usdc']:.2f} > MAX_ORDER_USDC {cfg['max_order_usdc']:.2f}"
+    if risk.get("daily_loss_usdc", 0.0) >= cfg["max_daily_loss_usdc"]:
+        return f"daily loss {risk.get('daily_loss_usdc', 0.0):.2f} >= max {cfg['max_daily_loss_usdc']:.2f}"
+    if risk.get("open_positions", 0) >= cfg["max_open_positions"]:
+        return f"open positions {risk.get('open_positions', 0)} >= max {cfg['max_open_positions']}"
+    if router is None:
+        return "router yok veya WALLET_PRIVATE_KEY eksik"
+    if not cfg["token_id"]:
+        return "POLYMARKET_TOKEN_ID eksik"
+    if pm_mid is None:
+        return "Polymarket mid yok"
+    return None
 
 def _f(field: dict, key: str, default: float = 0.0) -> float:
     try:
         return float(field.get(key, default))
     except (TypeError, ValueError):
         return default
+
+
+def _is_stale_signal(ts_ms: float, now_ms: int, max_age_ms: int = SIGNAL_MAX_STALE_MS) -> bool:
+    return bool(ts_ms and now_ms - ts_ms > max_age_ms)
 
 
 async def _latest_poly_mid(client) -> float | None:
@@ -85,23 +185,10 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
     gas = await compute_gas(cfg["w3"], cfg["priority_gwei"])
     karar = "ONAYLI" if decision.approved else "RED"
 
-    # --- Dashboard yayini: karari stream:executions'a bas (pass-through, MAXLEN ~10) ---
-    try:
-        await cfg["client"].xadd(
-            STREAM_EXECUTIONS,
-            {
-                "dir": direction,
-                "p_cex": f"{target:.8f}",
-                "karar": karar,
-                "slippage": f"{decision.slippage:.6f}",
-                "gas_gwei": f"{gwei(gas['maxFeePerGas']):.1f}",
-                "ts": str(int(time.time() * 1000)),
-            },
-            maxlen=10,
-            approximate=True,
-        )
-    except Exception as exc:  # gozlem kaybi kritik degil, akis sursun
-        log.error("[EXEC] stream:executions XADD hatasi: %s", exc)
+    # --- Dashboard yayini: her sinyal icin ilk karar gorunsun. ---
+    cfg["live_armed"] = await _runtime_live_armed(cfg["client"], cfg.get("env_live_armed", False))
+    visible_karar = "DRY_RUN" if cfg["mode"] != "LIVE" else karar
+    await _emit_execution(cfg, direction, target, visible_karar, decision, gas, decision.reason)
 
     # Emrin fiyati = gercek Polymarket mid (0..1). Yoksa 0.5 fallback (DRY gosterim).
     pm_mid = await _latest_poly_mid(cfg["client"])
@@ -130,17 +217,11 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
         return
 
     # ---------- LIVE ----------
-    if not decision.approved:
-        log.warning("LIVE: Slippage guard REDDETTI (%s) — emir atlaniyor.", decision.reason)
-        return
-    if router is None:
-        log.error("LIVE: router yok (WALLET_PRIVATE_KEY eksik).")
-        return
-    if not cfg["token_id"]:
-        log.error("LIVE: POLYMARKET_TOKEN_ID eksik — CLOB emri kurulamaz.")
-        return
-    if pm_mid is None:
-        log.error("LIVE: Polymarket fiyati (stream:polymarket) yok — emir fiyatlanamaz.")
+    risk = await _runtime_risk_state(cfg["client"])
+    block_reason = _live_block_reason(cfg, decision, router, pm_mid, risk)
+    if block_reason:
+        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, block_reason)
+        log.warning("LIVE_BLOCKED: %s", block_reason)
         return
 
     try:
@@ -150,6 +231,7 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
         resp = await submit_order(order, signature, addr, cfg["tx_timeout"])
         log.info("LIVE: CLOB emri gonderildi | Yon: %s price: %.4f resp: %s",
                  direction, order_price, resp)
+        await _emit_execution(cfg, direction, target, "LIVE_SENT", decision, gas, "order submitted")
     except asyncio.TimeoutError:
         log.error("LIVE: CLOB %ss icinde yanit vermedi — TIMEOUT.", cfg["tx_timeout"])
     except Exception as exc:
@@ -157,7 +239,7 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
 
 
 async def run(stop: asyncio.Event) -> None:
-    mode = os.getenv("TRADING_MODE", "DRY_RUN")
+    mode = os.getenv("TRADING_MODE", "DRY_RUN").upper()
     addr = os.getenv("REDIS_ADDR", "127.0.0.1:6379")
     password = os.getenv("REDIS_PASSWORD", "")
     rpc = os.getenv("POLYGON_RPC", "https://polygon-rpc.com")
@@ -166,7 +248,12 @@ async def run(stop: asyncio.Event) -> None:
         "mode": mode,
         "priority_gwei": int(os.getenv("PRIORITY_FEE_GWEI", "5")),
         "slippage_thr": float(os.getenv("SLIPPAGE_THRESHOLD", "0.01")),
-        "order_usdc": float(os.getenv("ORDER_SIZE_USDC", "100")),
+        "order_usdc": _env_float("ORDER_USDC", "ORDER_SIZE_USDC", default=1.0),
+        "max_order_usdc": _env_float("MAX_ORDER_USDC", default=1.0),
+        "max_daily_loss_usdc": _env_float("MAX_DAILY_LOSS_USDC", default=10.0),
+        "max_open_positions": _env_int("MAX_OPEN_POSITIONS", 1),
+        "env_live_armed": _truthy(os.getenv("LIVE_ARMED", "0")),
+        "live_armed": False,
         "liquidity_usdc": float(os.getenv("POLY_LIQUIDITY_USDC", "50000")),
         "tx_timeout": float(os.getenv("TX_TIMEOUT_SEC", "3")),
         "token_id": os.getenv("POLYMARKET_TOKEN_ID", ""),
@@ -190,8 +277,8 @@ async def run(stop: asyncio.Event) -> None:
             )
             log.info("[ROUTER] LIVE cuzdan: %s", router.account.address)
         except Exception as exc:
-            log.error("[ROUTER] LIVE kurulum hatasi: %s — DRY simulasyona dusuluyor.", exc)
-            cfg["mode"] = "DRY_RUN"
+            log.error("[ROUTER] LIVE kurulum hatasi: %s - emirler LIVE_BLOCKED olacak.", exc)
+            router = None
 
     # Redis baglantisi.
     host, _, port = addr.partition(":")

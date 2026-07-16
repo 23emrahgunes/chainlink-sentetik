@@ -12,6 +12,7 @@
   .pulse { animation:pulse 1.6s ease-in-out infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
   .card { background:linear-gradient(180deg,#111827,#0d131f); }
+  [x-cloak] { display:none !important; }
 </style>
 
 <body class="text-slate-200 min-h-screen p-4 sm:p-8" x-data="ghost()" x-init="init()">
@@ -23,11 +24,22 @@
       </h1>
       <p class="text-xs text-slate-500 tracking-[0.3em] uppercase">Live Telemetry</p>
     </div>
-    <div class="flex items-center gap-2 text-sm">
-      <span class="h-2.5 w-2.5 rounded-full pulse"
-            :class="wsOpen ? 'bg-emerald-400' : 'bg-rose-500'"></span>
-      <span x-text="wsOpen ? 'STREAM CANLI' : 'BAGLANTI YOK'"
-            :class="wsOpen ? 'text-emerald-400' : 'text-rose-500'"></span>
+    <div class="flex items-center gap-3 text-sm flex-wrap justify-end">
+      <div class="flex items-center gap-2">
+        <span class="h-2.5 w-2.5 rounded-full pulse"
+              :class="wsOpen ? 'bg-emerald-400' : 'bg-rose-500'"></span>
+        <span x-text="wsOpen ? 'STREAM CANLI' : 'BAGLANTI YOK'"
+              :class="wsOpen ? 'text-emerald-400' : 'text-rose-500'"></span>
+      </div>
+      <span class="px-2 py-1 rounded border text-xs font-semibold"
+            :class="liveArmed ? 'border-rose-500/60 text-rose-300 bg-rose-500/10' : 'border-slate-700 text-slate-400 bg-slate-900/60'"
+            x-text="liveArmed ? 'CANLI AKTİF' : (tradingMode === 'LIVE' ? 'LIVE HAZIR' : 'DRY RUN')"></span>
+      <button class="px-3 py-1.5 rounded border border-emerald-700/60 text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40"
+              x-show="!liveArmed"
+              @click="openLiveArm()">CANLI MODA GEÇ</button>
+      <button class="px-3 py-1.5 rounded border border-rose-700/60 text-rose-300 hover:bg-rose-500/10 disabled:opacity-40"
+              x-show="liveArmed"
+              @click="disarmLive()">DURDUR</button>
     </div>
   </header>
 
@@ -194,8 +206,9 @@
                   <span class="px-2 py-0.5 rounded text-xs font-semibold"
                         :class="{
                           'bg-sky-500/15 text-sky-300': row.status === 'SINYAL',
-                          'bg-emerald-500/15 text-emerald-300': row.status === 'ONAYLI',
-                          'bg-rose-500/15 text-rose-300': row.status === 'RED'
+                          'bg-emerald-500/15 text-emerald-300': row.status === 'ONAYLI' || row.status === 'LIVE_SENT',
+                          'bg-amber-500/15 text-amber-300': row.status === 'DRY_RUN',
+                          'bg-rose-500/15 text-rose-300': row.status === 'RED' || row.status === 'LIVE_BLOCKED'
                         }"
                         x-text="row.status"></span>
                 </td>
@@ -495,7 +508,7 @@
             </tr>
           </template>
           <tr x-show="tradesList.length === 0">
-            <td colspan="7" class="py-8 text-center text-slate-600">
+            <td colspan="8" class="py-8 text-center text-slate-600">
               Sonuçlanan işlem bekleniyor... <span class="pulse">▮</span>
             </td>
           </tr>
@@ -515,12 +528,37 @@
     </div>
   </section>
 
+
+  <div x-show="liveModalOpen" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+    <div class="card w-full max-w-md rounded-xl border border-rose-800/60 p-5 shadow-2xl">
+      <h2 class="text-lg font-bold text-rose-300 tracking-wide">CANLI EMİR MODU</h2>
+      <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <div class="text-slate-500">Order</div><div class="text-right tabular-nums" x-text="'$' + Number(liveLimits.order_usdc || 0).toFixed(2)"></div>
+        <div class="text-slate-500">Max Emir</div><div class="text-right tabular-nums" x-text="'$' + Number(liveLimits.max_order_usdc || 0).toFixed(2)"></div>
+        <div class="text-slate-500">Günlük Zarar</div><div class="text-right tabular-nums" x-text="'$' + Number(liveLimits.max_daily_loss_usdc || 0).toFixed(2)"></div>
+        <div class="text-slate-500">Açık Pozisyon</div><div class="text-right tabular-nums" x-text="liveLimits.max_open_positions || 0"></div>
+      </div>
+      <input class="mt-5 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-200 outline-none focus:border-rose-500"
+             x-model="liveConfirmText" placeholder="LIVE yaz" autocomplete="off" />
+      <p class="mt-2 text-xs text-rose-300" x-show="liveError" x-text="liveError"></p>
+      <div class="mt-5 flex justify-end gap-2">
+        <button class="px-3 py-1.5 rounded border border-slate-700 text-slate-300 hover:bg-slate-800"
+                @click="liveModalOpen=false; liveConfirmText=''; liveError=''">Vazgeç</button>
+        <button class="px-3 py-1.5 rounded border border-rose-600 text-rose-200 hover:bg-rose-500/10 disabled:opacity-40"
+                :disabled="liveConfirmText !== 'LIVE' || liveBusy"
+                @click="armLive()">CANLIYI AÇ</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     function ghost() {
       return {
         signals: [],          // son 5 satir (sinyal + execution birlesik)
         redisOk: false,
         wsOpen: false,
+        tradingMode: 'DRY_RUN', liveArmed: false, liveLimits: {}, liveModalOpen: false,
+        liveConfirmText: '', liveBusy: false, liveError: '',
         latency: null,
         totalSignals: 0,
         lastPrice: null,
@@ -590,9 +628,68 @@
         _msgCount: 0,
 
         init() {
+          this.loadLiveStatus();
           this.connect();
           // Mesaj hizi: saniyede bir sayaci oku (agir hesap degil).
           setInterval(() => { this.msgRate = this._msgCount; this._msgCount = 0; }, 1000);
+        },
+
+
+        async loadLiveStatus() {
+          try {
+            const r = await fetch('/api/live/status', { credentials: 'same-origin' });
+            if (!r.ok) return;
+            const d = await r.json();
+            this.tradingMode = d.trading_mode || 'DRY_RUN';
+            this.liveArmed = !!d.live_armed;
+            this.liveLimits = d;
+          } catch (_) {}
+        },
+
+        openLiveArm() {
+          this.liveError = '';
+          this.liveConfirmText = '';
+          this.liveModalOpen = true;
+          this.loadLiveStatus();
+        },
+
+        async armLive() {
+          if (this.liveConfirmText !== 'LIVE') return;
+          this.liveBusy = true;
+          this.liveError = '';
+          try {
+            const r = await fetch('/api/live/arm', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ confirm: this.liveConfirmText })
+            });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.detail || 'Canlı mod açılamadı');
+            this.tradingMode = d.trading_mode || 'LIVE';
+            this.liveArmed = !!d.live_armed;
+            this.liveLimits = d;
+            this.liveModalOpen = false;
+            this.liveConfirmText = '';
+          } catch (e) {
+            this.liveError = e.message || 'Canlı mod açılamadı';
+          } finally {
+            this.liveBusy = false;
+          }
+        },
+
+        async disarmLive() {
+          this.liveBusy = true;
+          try {
+            const r = await fetch('/api/live/disarm', { method: 'POST', credentials: 'same-origin' });
+            if (r.ok) {
+              const d = await r.json();
+              this.tradingMode = d.trading_mode || this.tradingMode;
+              this.liveArmed = !!d.live_armed;
+              this.liveLimits = d;
+            }
+          } finally {
+            this.liveBusy = false;
+          }
         },
 
         connect() {
@@ -612,6 +709,7 @@
 
           const d = msg.data || {};
           if (msg.type === 'cex') { this.onCex(d); return; }
+          if (msg.type === 'control') { this.liveArmed = d.armed === '1'; this.tradingMode = d.trading_mode || this.tradingMode; return; }
 
           if (msg.type === 'synthetic') {         // sentetik + spot referans
             this.synthPrice = Number(d.p_cex).toFixed(2);

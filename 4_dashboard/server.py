@@ -13,6 +13,7 @@ import base64
 import logging
 import os
 import secrets
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -53,8 +54,84 @@ def _require_auth(request: Request) -> None:
                         headers={"WWW-Authenticate": 'Basic realm="GHOST ORACLE"'})
 PORT = int(os.getenv("DASHBOARD_PORT", "8000"))
 HERE = Path(__file__).parent
+ENV_PATH = HERE.parent / ".env"
+LIVE_STATE_KEY = "state:live"
+STREAM_CONTROL = "stream:control"
 
 # stream anahtari -> istemciye gidecek mesaj tipi
+
+
+def _truthy(value: str | bool | int | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "live"}
+
+
+def _env_get(key: str, default: str = "") -> str:
+    if not ENV_PATH.exists():
+        return os.getenv(key, default)
+    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+        if line.startswith(key + "="):
+            return line.split("=", 1)[1]
+    return os.getenv(key, default)
+
+
+def _env_set(key: str, value: str) -> None:
+    ENV_PATH.touch(mode=0o600, exist_ok=True)
+    try:
+        ENV_PATH.chmod(0o600)
+    except OSError:
+        pass
+    lines = ENV_PATH.read_text(encoding="utf-8").splitlines()
+    done = False
+    out = []
+    for line in lines:
+        if line.startswith(key + "="):
+            out.append(f"{key}={value}")
+            done = True
+        else:
+            out.append(line)
+    if not done:
+        out.append(f"{key}={value}")
+    ENV_PATH.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def _live_payload(armed: bool | None = None) -> dict:
+    if armed is None:
+        armed = _truthy(_env_get("LIVE_ARMED", "0"))
+    return {
+        "trading_mode": _env_get("TRADING_MODE", "DRY_RUN"),
+        "live_armed": bool(armed),
+        "order_usdc": float(_env_get("ORDER_USDC", _env_get("ORDER_SIZE_USDC", "1")) or 0),
+        "max_order_usdc": float(_env_get("MAX_ORDER_USDC", "1") or 0),
+        "max_daily_loss_usdc": float(_env_get("MAX_DAILY_LOSS_USDC", "10") or 0),
+        "max_open_positions": int(float(_env_get("MAX_OPEN_POSITIONS", "1") or 0)),
+    }
+
+
+async def _publish_live_state(action: str, armed: bool) -> dict:
+    payload = _live_payload(armed)
+    client = _make_client()
+    try:
+        await client.hset(LIVE_STATE_KEY, mapping={
+            "armed": "1" if armed else "0",
+            "action": action,
+            "ts": str(int(time.time() * 1000)),
+            "trading_mode": payload["trading_mode"],
+        })
+        await client.xadd(
+            STREAM_CONTROL,
+            {
+                "action": action,
+                "armed": "1" if armed else "0",
+                "trading_mode": payload["trading_mode"],
+                "ts": str(int(time.time() * 1000)),
+            },
+            maxlen=50,
+            approximate=True,
+        )
+    finally:
+        await client.aclose()
+    return payload
+
 STREAMS = {
     "stream:synthetic": "synthetic",
     "stream:polymarket": "poly",
@@ -66,6 +143,7 @@ STREAMS = {
     "stream:signals": "signal",
     "stream:executions": "execution",
     "stream:cex_l2": "cex",
+    "stream:control": "control",
 }
 
 
@@ -162,6 +240,45 @@ async def straddle(request: Request) -> HTMLResponse:
     html = (HERE / "straddle.html").read_text(encoding="utf-8")
     html = html.replace("__WS_TOKEN__", WS_TOKEN)
     return HTMLResponse(html)
+
+
+@app.get("/api/live/status")
+async def live_status(request: Request) -> dict:
+    if AUTH_ON:
+        _require_auth(request)
+    client = _make_client()
+    armed = None
+    try:
+        state = await client.hgetall(LIVE_STATE_KEY)
+        if state and "armed" in state:
+            armed = _truthy(state.get("armed"))
+    except Exception:
+        armed = None
+    finally:
+        await client.aclose()
+    return _live_payload(armed)
+
+
+@app.post("/api/live/arm")
+async def live_arm(request: Request) -> dict:
+    if AUTH_ON:
+        _require_auth(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if str(body.get("confirm", "")).strip() != "LIVE":
+        raise HTTPException(status_code=400, detail="LIVE onayi gerekli")
+    _env_set("LIVE_ARMED", "1")
+    return await _publish_live_state("ARM_LIVE", True)
+
+
+@app.post("/api/live/disarm")
+async def live_disarm(request: Request) -> dict:
+    if AUTH_ON:
+        _require_auth(request)
+    _env_set("LIVE_ARMED", "0")
+    return await _publish_live_state("DISARM_LIVE", False)
 
 
 @app.websocket("/ws")

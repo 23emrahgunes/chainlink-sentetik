@@ -35,3 +35,11 @@
 - Bybit/Coinbase/Kraken now require local orderbook correctness. If changing feed depth, update `book_state_test.go` or add a venue-specific fixture test.
 - OKX spot and OKX swap intentionally publish as different sources: `okx` and `okx_swap`.
 - LIVE CLOB order execution was not changed in this pass. Validate with official Polymarket client before using real funds.
+
+## 2026-07-16 - Live arm/disarm safety plan implementation
+
+- Added dashboard live controls backed by `/api/live/status`, `/api/live/arm`, and `/api/live/disarm`.
+- Live arming writes `LIVE_ARMED` to the VPS-local `.env`, syncs Redis `state:live`, and emits `stream:control`.
+- Execution now blocks LIVE orders unless `TRADING_MODE=LIVE`, runtime `LIVE_ARMED=1`, order/risk limits pass, router/token/mid are present, and slippage is approved.
+- `deploy/run.sh` now syncs `.env` live state to Redis on every start and runs all `test_*.py` suites.
+- Added `deploy/live.env.example` for VPS live configuration without secrets.

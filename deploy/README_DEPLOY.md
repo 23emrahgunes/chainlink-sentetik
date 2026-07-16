@@ -88,6 +88,27 @@ PY
 bash deploy/run.sh --no-tests
 ```
 
+
+## Live mode safety
+
+The deploy runner syncs `.env` into Redis on every start. If `LIVE_ARMED` is missing, it writes `LIVE_ARMED=0` and keeps the bot disarmed.
+
+Minimum live configuration on the VPS:
+
+```env
+TRADING_MODE=LIVE
+LIVE_ARMED=0
+ORDER_USDC=1
+MAX_ORDER_USDC=1
+MAX_DAILY_LOSS_USDC=10
+MAX_OPEN_POSITIONS=1
+SIGNAL_MAX_STALE_MS=2000
+SLIPPAGE_THRESHOLD=0.01
+TX_TIMEOUT_SEC=3
+```
+
+After the system is running, use the dashboard button to arm/disarm live trading. Do not set `LIVE_ARMED=1` manually unless you intentionally want the bot armed immediately after deploy.
+
 ## Redis note
 
 This repo uses Docker Redis (`ghost-redis`). Do not start Ubuntu's `redis-server.service` on the same port, because Docker already owns `6379`.

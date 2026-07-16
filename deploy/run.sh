@@ -174,6 +174,26 @@ ensure_dashboard_auth() {
   fi
 }
 
+
+ensure_live_defaults() {
+  local mode armed
+  mode="$(get_env_kv TRADING_MODE || true)"
+  armed="$(get_env_kv LIVE_ARMED || true)"
+  if [ -z "$mode" ]; then
+    mode="DRY_RUN"
+    set_env_kv TRADING_MODE "$mode"
+  fi
+  if [ -z "$armed" ]; then
+    armed="0"
+    set_env_kv LIVE_ARMED "$armed"
+  fi
+  redis_cli HSET state:live armed "$armed" action DEPLOY_SYNC trading_mode "$mode" ts "$(date +%s%3N)" >/dev/null || true
+  redis_cli XADD stream:control MAXLEN '~' 50 '*' action DEPLOY_SYNC armed "$armed" trading_mode "$mode" ts "$(date +%s%3N)" >/dev/null || true
+  log "Live safety"
+  echo "TRADING_MODE=$mode"
+  echo "LIVE_ARMED=$armed"
+}
+
 print_status() {
   log "Docker Redis"
   docker ps --filter "name=$REDIS_CONTAINER" --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' || true
@@ -259,6 +279,7 @@ if [ "$DO_INSTALL" -eq 1 ]; then
 fi
 
 ensure_dashboard_auth
+ensure_live_defaults
 
 log "Building Go ingestion"
 ( cd "$ROOT/1_ingestion_agents" && go mod tidy && go build -o ghost-ingestion . )
@@ -270,11 +291,11 @@ if [ "$DO_TESTS" -eq 1 ]; then
   log "Running Python tests"
   brain_py="$(py_for 2_brain_engine)"
   dash_py="$(py_for 4_dashboard)"
-  ( cd "$ROOT/2_brain_engine" && "$brain_py" -m unittest test_paper_trader.py && "$brain_py" -m py_compile *.py )
-  ( cd "$ROOT/4_dashboard" && "$dash_py" -m unittest test_dashboard_contract.py && "$dash_py" -m py_compile *.py )
+  ( cd "$ROOT/2_brain_engine" && "$brain_py" -m unittest discover -p "test_*.py" && "$brain_py" -m py_compile *.py )
+  ( cd "$ROOT/4_dashboard" && "$dash_py" -m unittest discover -p "test_*.py" && "$dash_py" -m py_compile *.py )
   if [ "$DO_EXEC" -eq 1 ]; then
     exec_py="$(py_for 3_execution_agent)"
-    ( cd "$ROOT/3_execution_agent" && "$exec_py" -m py_compile *.py )
+    ( cd "$ROOT/3_execution_agent" && "$exec_py" -m unittest discover -p "test_*.py" && "$exec_py" -m py_compile *.py )
   fi
 fi
 
