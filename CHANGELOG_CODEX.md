@@ -43,3 +43,9 @@
 - Execution now blocks LIVE orders unless `TRADING_MODE=LIVE`, runtime `LIVE_ARMED=1`, order/risk limits pass, router/token/mid are present, and slippage is approved.
 - `deploy/run.sh` now syncs `.env` live state to Redis on every start and runs all `test_*.py` suites.
 - Added `deploy/live.env.example` for VPS live configuration without secrets.
+
+## 2026-07-16 - Legacy PM_EDGE env aliases
+
+- Added `3_execution_agent/env_alias.py` so older working `PM_EDGE_*` configuration names map to the current execution/CLOB settings.
+- Supported aliases include private key, CLOB API credentials, CLOB host, chain id, notional size, max live notional, timeout, and signature type.
+- Updated deploy live env example and tests for old-to-new env compatibility.

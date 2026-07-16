@@ -29,6 +29,8 @@ from eth_account import Account
 from eth_account.messages import encode_typed_data
 from eth_utils import keccak, to_hex
 
+from env_alias import env, env_int
+
 log = logging.getLogger("exec.clob")
 
 ZERO_ADDR = "0x0000000000000000000000000000000000000000"
@@ -58,9 +60,9 @@ def _domain() -> dict:
     return {
         "name": "Polymarket CTF Exchange",
         "version": "1",
-        "chainId": int(os.getenv("POLYGON_CHAIN_ID", "137")),
+        "chainId": env_int("POLYGON_CHAIN_ID", 137),
         # VERIFY: CTFExchange (Polygon). NegRisk pazarlari icin farkli adres.
-        "verifyingContract": os.getenv(
+        "verifyingContract": env(
             "POLYMARKET_EXCHANGE", "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
         ),
     }
@@ -95,9 +97,9 @@ def build_order(direction: str, token_id: str, price: float, size_usdc: float,
         "takerAmount": taker_amt,
         "expiration": 0,  # 0 = GTC (suresiz)
         "nonce": 0,
-        "feeRateBps": int(os.getenv("POLY_FEE_BPS", "0")),
+        "feeRateBps": env_int("POLY_FEE_BPS", 0),
         "side": side,
-        "signatureType": 0,  # 0 = EOA (ECDSA)
+        "signatureType": env_int("SIGNATURE_TYPE", 0),
     }
 
 
@@ -139,9 +141,9 @@ def _l2_headers(address: str, method: str, path: str, body: str) -> dict:
     Polymarket L2 auth header'lari (HMAC-SHA256).
     VERIFY: header adlari/format resmi py-clob-client ile teyit edilmeli.
     """
-    api_key = os.getenv("POLY_API_KEY", "")
-    secret = os.getenv("POLY_API_SECRET", "")
-    passphrase = os.getenv("POLY_API_PASSPHRASE", "")
+    api_key = env("POLY_API_KEY", "")
+    secret = env("POLY_API_SECRET", "")
+    passphrase = env("POLY_API_PASSPHRASE", "")
     if not (api_key and secret and passphrase):
         raise RuntimeError("POLY_API_KEY/SECRET/PASSPHRASE eksik — CLOB LIVE kapali.")
 
@@ -171,11 +173,11 @@ async def submit_order(order: dict, signature: str, address: str,
 
     import requests  # yalnizca LIVE'da import edilir
 
-    base = os.getenv("CLOB_API", "https://clob.polymarket.com")
+    base = env("CLOB_API", "https://clob.polymarket.com")
     path = "/order"
     payload = {
         "order": {**order, "signature": signature},
-        "owner": os.getenv("POLY_API_KEY", ""),
+        "owner": env("POLY_API_KEY", ""),
         "orderType": "GTC",
     }
     body = json.dumps(payload, separators=(",", ":"))

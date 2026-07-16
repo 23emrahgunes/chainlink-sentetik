@@ -24,6 +24,7 @@ from web3 import AsyncWeb3, AsyncHTTPProvider
 
 from clob_order import build_order, order_hash, sign_order, submit_order
 from gas_booster import compute_gas, gwei
+from env_alias import env, env_float, env_int, normalized_mode
 from risk_guard import check_slippage
 
 # .env: once kok dizin (diger ajanlarla ayni desen), sonra yerel.
@@ -51,23 +52,6 @@ SIGNAL_MAX_STALE_MS = int(os.getenv("SIGNAL_MAX_STALE_MS", "2000"))
 def _truthy(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on", "live"}
 
-
-def _env_float(*names: str, default: float = 0.0) -> float:
-    for name in names:
-        value = os.getenv(name)
-        if value not in (None, ""):
-            try:
-                return float(value)
-            except ValueError:
-                return default
-    return default
-
-
-def _env_int(name: str, default: int = 0) -> int:
-    try:
-        return int(float(os.getenv(name, str(default))))
-    except ValueError:
-        return default
 
 
 async def _emit_execution(cfg: dict, direction: str, target: float, karar: str,
@@ -227,7 +211,7 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
     try:
         addr = router.account.address
         order = build_order(direction, cfg["token_id"], order_price, cfg["order_usdc"], maker=addr)
-        signature = sign_order(order, os.getenv("WALLET_PRIVATE_KEY", ""))
+        signature = sign_order(order, env("WALLET_PRIVATE_KEY", ""))
         resp = await submit_order(order, signature, addr, cfg["tx_timeout"])
         log.info("LIVE: CLOB emri gonderildi | Yon: %s price: %.4f resp: %s",
                  direction, order_price, resp)
@@ -239,24 +223,24 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
 
 
 async def run(stop: asyncio.Event) -> None:
-    mode = os.getenv("TRADING_MODE", "DRY_RUN").upper()
+    mode = normalized_mode()
     addr = os.getenv("REDIS_ADDR", "127.0.0.1:6379")
     password = os.getenv("REDIS_PASSWORD", "")
-    rpc = os.getenv("POLYGON_RPC", "https://polygon-rpc.com")
+    rpc = env("POLYGON_RPC", "https://polygon-rpc.com")
 
     cfg = {
         "mode": mode,
-        "priority_gwei": int(os.getenv("PRIORITY_FEE_GWEI", "5")),
-        "slippage_thr": float(os.getenv("SLIPPAGE_THRESHOLD", "0.01")),
-        "order_usdc": _env_float("ORDER_USDC", "ORDER_SIZE_USDC", default=1.0),
-        "max_order_usdc": _env_float("MAX_ORDER_USDC", default=1.0),
-        "max_daily_loss_usdc": _env_float("MAX_DAILY_LOSS_USDC", default=10.0),
-        "max_open_positions": _env_int("MAX_OPEN_POSITIONS", 1),
+        "priority_gwei": env_int("PRIORITY_FEE_GWEI", 5),
+        "slippage_thr": env_float("SLIPPAGE_THRESHOLD", 0.01),
+        "order_usdc": env_float("ORDER_USDC", 1.0),
+        "max_order_usdc": env_float("MAX_ORDER_USDC", 1.0),
+        "max_daily_loss_usdc": env_float("MAX_DAILY_LOSS_USDC", 10.0),
+        "max_open_positions": env_int("MAX_OPEN_POSITIONS", 1),
         "env_live_armed": _truthy(os.getenv("LIVE_ARMED", "0")),
         "live_armed": False,
-        "liquidity_usdc": float(os.getenv("POLY_LIQUIDITY_USDC", "50000")),
-        "tx_timeout": float(os.getenv("TX_TIMEOUT_SEC", "3")),
-        "token_id": os.getenv("POLYMARKET_TOKEN_ID", ""),
+        "liquidity_usdc": env_float("POLY_LIQUIDITY_USDC", 50000.0),
+        "tx_timeout": env_float("TX_TIMEOUT_SEC", 3.0),
+        "token_id": env("POLYMARKET_TOKEN_ID", ""),
         # Read-only w3 — gas base_fee icin (key gerektirmez).
         "w3": AsyncWeb3(AsyncHTTPProvider(rpc)),
     }
@@ -272,8 +256,8 @@ async def run(stop: asyncio.Event) -> None:
         try:
             router = PolyRouter(
                 rpc,
-                os.getenv("POLYMARKET_CONTRACT", ""),
-                os.getenv("WALLET_PRIVATE_KEY", ""),
+                env("POLYMARKET_CONTRACT", ""),
+                env("WALLET_PRIVATE_KEY", ""),
             )
             log.info("[ROUTER] LIVE cuzdan: %s", router.account.address)
         except Exception as exc:

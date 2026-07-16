@@ -58,6 +58,13 @@ ENV_PATH = HERE.parent / ".env"
 LIVE_STATE_KEY = "state:live"
 STREAM_CONTROL = "stream:control"
 
+ENV_ALIASES = {
+    "TRADING_MODE": ("PM_EDGE_MOMENTUM_EXECUTION_MODE",),
+    "ORDER_USDC": ("PM_EDGE_MOMENTUM_NOTIONAL_USDC",),
+    "MAX_ORDER_USDC": ("PM_EDGE_MOMENTUM_MAX_LIVE_NOTIONAL_USDC",),
+    "TX_TIMEOUT_SEC": ("PM_EDGE_CLOB_HTTP_TIMEOUT_SECONDS",),
+}
+
 # stream anahtari -> istemciye gidecek mesaj tipi
 
 
@@ -65,13 +72,28 @@ def _truthy(value: str | bool | int | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on", "live"}
 
 
+def _normalize_mode(value: str) -> str:
+    raw = str(value or "DRY_RUN").strip().upper()
+    if raw in {"DRY", "DRYRUN", "DRY_RUN", "PAPER"}:
+        return "DRY_RUN"
+    if raw in {"LIVE", "REAL", "TRUE", "1"}:
+        return "LIVE"
+    return raw
+
+
 def _env_get(key: str, default: str = "") -> str:
-    if not ENV_PATH.exists():
-        return os.getenv(key, default)
-    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
-        if line.startswith(key + "="):
-            return line.split("=", 1)[1]
-    return os.getenv(key, default)
+    keys = (key, *ENV_ALIASES.get(key, ()))
+    if ENV_PATH.exists():
+        lines = ENV_PATH.read_text(encoding="utf-8").splitlines()
+        for candidate in keys:
+            for line in lines:
+                if line.startswith(candidate + "="):
+                    return line.split("=", 1)[1]
+    for candidate in keys:
+        value = os.getenv(candidate)
+        if value not in (None, ""):
+            return value
+    return default
 
 
 def _env_set(key: str, value: str) -> None:
@@ -98,7 +120,7 @@ def _live_payload(armed: bool | None = None) -> dict:
     if armed is None:
         armed = _truthy(_env_get("LIVE_ARMED", "0"))
     return {
-        "trading_mode": _env_get("TRADING_MODE", "DRY_RUN"),
+        "trading_mode": _normalize_mode(_env_get("TRADING_MODE", "DRY_RUN")),
         "live_armed": bool(armed),
         "order_usdc": float(_env_get("ORDER_USDC", _env_get("ORDER_SIZE_USDC", "1")) or 0),
         "max_order_usdc": float(_env_get("MAX_ORDER_USDC", "1") or 0),

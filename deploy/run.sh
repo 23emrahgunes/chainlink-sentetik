@@ -150,6 +150,36 @@ get_env_kv() {
   grep -E "^${key}=" "$file" | tail -n 1 | cut -d= -f2-
 }
 
+
+get_env_any() {
+  local primary="$1"
+  shift
+  local value
+  value="$(get_env_kv "$primary" || true)"
+  if [ -n "$value" ]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+  for key in "$@"; do
+    value="$(get_env_kv "$key" || true)"
+    if [ -n "$value" ]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  done
+  return 1
+}
+
+normalize_mode() {
+  local raw
+  raw="$(printf '%s' "${1:-DRY_RUN}" | tr '[:lower:]' '[:upper:]')"
+  case "$raw" in
+    DRY|DRYRUN|DRY_RUN|PAPER) printf 'DRY_RUN\n' ;;
+    LIVE|REAL|TRUE|1) printf 'LIVE\n' ;;
+    *) printf '%s\n' "$raw" ;;
+  esac
+}
+
 ensure_dashboard_auth() {
   local user pass generated
   user="$(get_env_kv DASHBOARD_USER || true)"
@@ -177,7 +207,8 @@ ensure_dashboard_auth() {
 
 ensure_live_defaults() {
   local mode armed
-  mode="$(get_env_kv TRADING_MODE || true)"
+  mode="$(get_env_any TRADING_MODE PM_EDGE_MOMENTUM_EXECUTION_MODE || true)"
+  mode="$(normalize_mode "${mode:-DRY_RUN}")"
   armed="$(get_env_kv LIVE_ARMED || true)"
   if [ -z "$mode" ]; then
     mode="DRY_RUN"

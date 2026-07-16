@@ -62,6 +62,19 @@ class LiveApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(disarmed["live_armed"])
         self.assertIn("LIVE_ARMED=0", self.env_path.read_text(encoding="utf-8"))
 
+    async def test_legacy_pm_edge_env_aliases_status_payload(self):
+        self.env_path.write_text(
+            "PM_EDGE_MOMENTUM_EXECUTION_MODE=live\n"
+            "PM_EDGE_MOMENTUM_NOTIONAL_USDC=1.50\n"
+            "PM_EDGE_MOMENTUM_MAX_LIVE_NOTIONAL_USDC=2.00\n"
+            "LIVE_ARMED=0\n",
+            encoding="utf-8",
+        )
+        payload = server._live_payload()
+        self.assertEqual(payload["trading_mode"], "LIVE")
+        self.assertEqual(payload["order_usdc"], 1.5)
+        self.assertEqual(payload["max_order_usdc"], 2.0)
+
     async def test_auth_helper_blocks_missing_credentials(self):
         with self.assertRaises(HTTPException) as ctx:
             server._require_auth(SimpleNamespace(headers={}))
