@@ -214,11 +214,12 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
 
     try:
         addr = router.account.address
-        order = build_order(direction, token_id, order_price, cfg["order_usdc"], maker=addr)
+        maker_addr = env("FUNDER_ADDRESS", "") or addr
+        order = build_order(direction, token_id, order_price, cfg["order_usdc"], maker=maker_addr, signer=addr)
         signature = sign_order(order, env("WALLET_PRIVATE_KEY", ""))
         resp = await submit_order(order, signature, addr, cfg["tx_timeout"])
-        log.info("LIVE: CLOB emri gonderildi | Yon: %s price: %.4f resp: %s",
-                 direction, order_price, resp)
+        log.info("LIVE: CLOB emri gonderildi | Yon: %s price: %.4f maker: %s resp: %s",
+                 direction, order_price, maker_addr, resp)
         await _emit_execution(cfg, direction, target, "LIVE_SENT", decision, gas, "order submitted")
     except asyncio.TimeoutError:
         reason = f"CLOB timeout {cfg['tx_timeout']}s"

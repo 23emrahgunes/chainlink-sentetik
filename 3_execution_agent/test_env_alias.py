@@ -10,6 +10,10 @@ class EnvAliasTest(unittest.TestCase):
         with patch.dict(os.environ, {"PM_EDGE_PRIVATE_KEY": "secret"}, clear=True):
             self.assertEqual(env("WALLET_PRIVATE_KEY"), "secret")
 
+    def test_pm_edge_funder_alias(self):
+        with patch.dict(os.environ, {"PM_EDGE_FUNDER_ADDRESS": "0xfunder"}, clear=True):
+            self.assertEqual(env("FUNDER_ADDRESS"), "0xfunder")
+
     def test_new_name_wins_over_legacy_alias(self):
         with patch.dict(os.environ, {"WALLET_PRIVATE_KEY": "new", "PM_EDGE_PRIVATE_KEY": "old"}, clear=True):
             self.assertEqual(env("WALLET_PRIVATE_KEY"), "new")
