@@ -192,7 +192,7 @@ if [ "$DO_INSTALL" -eq 1 ]; then
 fi
 
 log "Building Go ingestion"
-( cd "$ROOT/1_ingestion_agents" && go mod download && go build -o ghost-ingestion . )
+( cd "$ROOT/1_ingestion_agents" && go mod tidy && go build -o ghost-ingestion . )
 
 if [ "$DO_TESTS" -eq 1 ]; then
   log "Running Go tests"

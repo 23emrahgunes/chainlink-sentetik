@@ -37,6 +37,15 @@ bash deploy/run.sh --status
 bash deploy/run.sh --stop
 tmux attach -t ghost
 ```
+If you are inside a subdirectory, either return to the repo root first or call the script with the correct relative path:
+
+```bash
+cd ~/chainlink-sentetik
+bash deploy/run.sh --status
+# or from 4_dashboard:
+bash ../deploy/run.sh --status
+```
+
 
 Detach from tmux with `Ctrl+b`, then `d`.
 
