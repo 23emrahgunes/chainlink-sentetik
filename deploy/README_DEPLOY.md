@@ -59,6 +59,8 @@ bash deploy/run.sh --pull --no-exec
 
 `--install` installs Python requirements before restart. Use it after dependency changes.
 
+`run.sh` also creates missing per-agent Python virtualenvs automatically and installs that agent's `requirements.txt`. Use `--install` to force dependency refresh even when the venv already exists.
+
 
 ## Dashboard password
 

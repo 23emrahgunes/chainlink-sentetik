@@ -205,6 +205,27 @@ ensure_dashboard_auth() {
 }
 
 
+
+ensure_python_envs() {
+  local d pip created
+  for d in 2_brain_engine 3_execution_agent 4_dashboard; do
+    created=0
+    if [ ! -x "$ROOT/$d/.venv/bin/python" ]; then
+      log "Creating Python venv: $d/.venv"
+      python3 -m venv "$ROOT/$d/.venv"
+      created=1
+    fi
+    pip="$ROOT/$d/.venv/bin/pip"
+    if [ "$created" -eq 1 ] || [ "$DO_INSTALL" -eq 1 ]; then
+      log "Installing Python requirements: $d"
+      "$pip" install -q --upgrade pip
+      if [ -f "$ROOT/$d/requirements.txt" ]; then
+        "$pip" install -q -r "$ROOT/$d/requirements.txt"
+      fi
+    fi
+  done
+}
+
 ensure_live_defaults() {
   local mode armed
   mode="$(get_env_any TRADING_MODE PM_EDGE_MOMENTUM_EXECUTION_MODE || true)"
@@ -298,16 +319,7 @@ for i in $(seq 1 20); do
   fi
 done
 
-if [ "$DO_INSTALL" -eq 1 ]; then
-  log "Installing Python requirements"
-  for d in 2_brain_engine 3_execution_agent 4_dashboard; do
-    pip_cmd="$(pip_for "$d")"
-    if [ -f "$ROOT/$d/requirements.txt" ]; then
-      # shellcheck disable=SC2086
-      $pip_cmd install -r "$ROOT/$d/requirements.txt"
-    fi
-  done
-fi
+ensure_python_envs
 
 ensure_dashboard_auth
 ensure_live_defaults
