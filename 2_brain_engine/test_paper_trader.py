@@ -1,6 +1,6 @@
 import unittest
 
-from paper_trader import payout_profit
+from paper_trader import payout_profit, share_quantity
 
 
 class PaperPnlTest(unittest.TestCase):
@@ -9,6 +9,9 @@ class PaperPnlTest(unittest.TestCase):
 
     def test_loser_loses_stake(self):
         self.assertAlmostEqual(payout_profit(1.0, 0.025, False), -1.0)
+
+    def test_share_quantity_matches_entry_price(self):
+        self.assertAlmostEqual(share_quantity(1.0, 0.095), 10.5263157895)
 
     def test_pnl_after_sequence(self):
         pnl = 0.0

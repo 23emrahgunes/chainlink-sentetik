@@ -460,6 +460,7 @@
           <tr class="text-slate-500 border-b border-slate-800 text-left">
             <th class="py-2 font-medium">Market (5dk)</th>
             <th class="py-2 font-medium">Alınan Share</th>
+            <th class="py-2 font-medium text-right">Adet</th>
             <th class="py-2 font-medium text-right">Giriş (maliyet)</th>
             <th class="py-2 font-medium">Market Sonucu</th>
             <th class="py-2 font-medium">Durum</th>
@@ -474,6 +475,8 @@
               <td class="py-2 font-bold"
                   :class="t.share === 'UP' ? 'text-emerald-400' : 'text-rose-400'"
                   x-text="t.share === 'UP' ? '▲ UP' : '▼ DOWN'"></td>
+              <td class="py-2 text-right tabular-nums text-slate-300"
+                  x-text="Number(t.shareQty || 0).toFixed(3)"></td>
               <td class="py-2 text-right tabular-nums text-slate-300"
                   x-text="Number(t.entryCents || t.entry*100).toFixed(1) + '¢'"></td>
               <td class="py-2 font-semibold"
@@ -675,6 +678,7 @@
               this.tradesList.unshift({
                 win, label, marketLabel: d.market_label ? `${label} - ${d.market_label}` : label, dir: d.dir, outcome: d.outcome,
                 share, result,
+                shareQty: d.share_qty !== undefined ? Number(d.share_qty) : (Number(d.entry) > 0 ? 1 / Number(d.entry) : 0),
                 entry: Number(d.entry), entryCents: d.entry_cents !== undefined ? Number(d.entry_cents) : Number(d.entry) * 100,
                 won: d.won === '1',
                 profit: Number(d.profit), pnl_after: Number(d.pnl_after),

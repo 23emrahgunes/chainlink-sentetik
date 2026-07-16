@@ -381,6 +381,7 @@ async def run(stop: asyncio.Event) -> None:
                         "profit": f"{rec['profit']:.4f}",
                         "entry": f"{rec['entry']:.4f}",
                         "entry_cents": f"{rec.get('entry_cents', rec['entry'] * 100):.2f}",
+                        "share_qty": f"{rec.get('share_qty', (trader.stake / rec['entry']) if rec['entry'] else 0.0):.6f}",
                         "share": rec.get("share", "UP" if rec["dir"] == "LONG" else "DOWN"),
                         "result": rec.get("result", "UP" if rec["outcome"] == "LONG" else "DOWN"),
                         "market_label": rec.get("market_label", f"BTC Up/Down 5m {rec['win']}"),

@@ -20,6 +20,12 @@ log = logging.getLogger("brain.paper")
 WINDOW_SEC = 300  # kapanmis pencereler END zamaniyla anahtarli (start+300)
 
 
+def share_quantity(stake: float, entry_price: float) -> float:
+    if entry_price > 0:
+        return stake / entry_price
+    return 0.0
+
+
 def payout_profit(stake: float, entry_price: float, won: bool) -> float:
     if won and entry_price > 0:
         return stake * (1.0 / entry_price - 1.0)
@@ -137,6 +143,7 @@ class PaperTrader:
             outcome = "LONG" if c >= o else "SHORT"
             p = tr["entry_price"]
             won = (tr["dir"] == outcome)
+            qty = share_quantity(self.stake, p)
             profit = payout_profit(self.stake, p, won)
             self.pnl += profit
             self.trades += 1
@@ -150,6 +157,7 @@ class PaperTrader:
                 "share": share, "result": result,
                 "market_label": "BTC Up/Down 5m",
                 "entry_cents": p * 100.0,
+                "share_qty": qty,
                 "won": won, "profit": profit, "entry": p, "pnl_after": self.pnl,
                 "margin": tr.get("entry_margin", -1.0),   # giris baglami (teshis)
                 "obi": tr.get("entry_obi", 0.0),
