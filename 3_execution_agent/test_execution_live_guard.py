@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 try:
-    from main_execution import _is_stale_signal, _live_block_reason
+    from main_execution import _is_stale_signal, _latest_poly_snapshot, _live_block_reason
 except ModuleNotFoundError as exc:
     _is_stale_signal = None
     _live_block_reason = None
@@ -40,6 +40,12 @@ class LiveGuardTest(unittest.TestCase):
     def test_stale_signal_helper(self):
         self.assertTrue(_is_stale_signal(1000, 4001, max_age_ms=2000))
         self.assertFalse(_is_stale_signal(2500, 4001, max_age_ms=2000))
+
+    def test_latest_poly_snapshot_returns_mid_and_token(self):
+        client = FakePolyClient([("1-0", {"mid": "0.42", "token": "12345"})])
+        mid, token = __import__("asyncio").run(_latest_poly_snapshot(client))
+        self.assertEqual(mid, 0.42)
+        self.assertEqual(token, "12345")
 
     def test_live_requires_armed(self):
         reason = _live_block_reason(

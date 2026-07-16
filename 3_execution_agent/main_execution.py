@@ -136,19 +136,21 @@ def _is_stale_signal(ts_ms: float, now_ms: int, max_age_ms: int = SIGNAL_MAX_STA
     return bool(ts_ms and now_ms - ts_ms > max_age_ms)
 
 
-async def _latest_poly_mid(client) -> float | None:
-    """stream:polymarket'ten son mid fiyati (0..1) tek seferlik oku. Yoksa None."""
+async def _latest_poly_snapshot(client) -> tuple[float | None, str]:
+    """Return latest Polymarket mid and outcome token from stream:polymarket."""
     try:
         rows = await client.xrevrange(STREAM_POLY, count=1)
     except Exception:
-        return None
+        return None, ""
     if not rows:
-        return None
+        return None, ""
     _id, fields = rows[0]
+    token = str(fields.get("token", "") or "")
     try:
-        return float(fields.get("mid", "0")) or None
+        mid = float(fields.get("mid", "0")) or None
     except (TypeError, ValueError):
-        return None
+        mid = None
+    return mid, token
 
 
 async def handle_signal(field: dict, cfg: dict, router) -> None:
@@ -175,7 +177,8 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
     await _emit_execution(cfg, direction, target, visible_karar, decision, gas, decision.reason)
 
     # Emrin fiyati = gercek Polymarket mid (0..1). Yoksa 0.5 fallback (DRY gosterim).
-    pm_mid = await _latest_poly_mid(cfg["client"])
+    pm_mid, live_token_id = await _latest_poly_snapshot(cfg["client"])
+    token_id = cfg["token_id"] or live_token_id
     order_price = pm_mid if pm_mid is not None else 0.5
 
     if cfg["mode"] != "LIVE":
@@ -193,8 +196,8 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
         log.info("       Yon: %s | %s | est_fill=%.4f",
                  direction, decision.reason, decision.est_fill_price)
         # Gercek CLOB emrini kur + EIP-712 hash'i (imzasiz, anahtar gerekmez).
-        if decision.approved and cfg["token_id"]:
-            order = build_order(direction, cfg["token_id"], order_price, cfg["order_usdc"])
+        if decision.approved and token_id:
+            order = build_order(direction, token_id, order_price, cfg["order_usdc"])
             log.info("       CLOB emri hazir (imzasiz): price=%.4f (PM=%s) hash=%s",
                      order_price, "yok" if pm_mid is None else f"{pm_mid:.4f}",
                      order_hash(order))
@@ -202,7 +205,8 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
 
     # ---------- LIVE ----------
     risk = await _runtime_risk_state(cfg["client"])
-    block_reason = _live_block_reason(cfg, decision, router, pm_mid, risk)
+    live_cfg = {**cfg, "token_id": token_id}
+    block_reason = _live_block_reason(live_cfg, decision, router, pm_mid, risk)
     if block_reason:
         await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, block_reason)
         log.warning("LIVE_BLOCKED: %s", block_reason)
@@ -210,7 +214,7 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
 
     try:
         addr = router.account.address
-        order = build_order(direction, cfg["token_id"], order_price, cfg["order_usdc"], maker=addr)
+        order = build_order(direction, token_id, order_price, cfg["order_usdc"], maker=addr)
         signature = sign_order(order, env("WALLET_PRIVATE_KEY", ""))
         resp = await submit_order(order, signature, addr, cfg["tx_timeout"])
         log.info("LIVE: CLOB emri gonderildi | Yon: %s price: %.4f resp: %s",
