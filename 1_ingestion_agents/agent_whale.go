@@ -5,8 +5,9 @@
 //
 // KISIT (2GB Banana Pi): BTC perp saniyede yuzlerce islem uretir. Firehose'u
 // Redis'e dokmek yerine WHALE_FLUSH_MS araliginda TOPLANIP yayinlanir:
-//   buy_vol/sell_vol (agresif alim/satim hacmi), max_buy/max_sell (en buyuk tek
-//   islem = balina), n (islem sayisi). CVD ve balina mantigi Python'da.
+//
+//	buy_vol/sell_vol (agresif alim/satim hacmi), max_buy/max_sell (en buyuk tek
+//	islem = balina), n (islem sayisi). CVD ve balina mantigi Python'da.
 package main
 
 import (
@@ -21,8 +22,9 @@ import (
 )
 
 // aggTradeMsg: Binance @aggTrade payload'unun minimal alanlari.
-//   m (isBuyerMaker): true  -> agresor SATICI (market sell)
-//                     false -> agresor ALICI  (market buy)
+//
+//	m (isBuyerMaker): true  -> agresor SATICI (market sell)
+//	                  false -> agresor ALICI  (market buy)
 type aggTradeMsg struct {
 	Q string `json:"q"` // miktar (BTC)
 	M bool   `json:"m"` // isBuyerMaker

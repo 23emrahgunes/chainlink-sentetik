@@ -27,7 +27,7 @@ func getenv(key, fallback string) string {
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
-	// .env: once kok dizin (../.env), sonra yerel — sessizce dener.
+	// .env: once kok dizin (../.env), sonra yerel â€” sessizce dener.
 	_ = godotenv.Load("../.env")
 	_ = godotenv.Load(".env")
 
@@ -44,6 +44,7 @@ func main() {
 		BinanceAdapter(getenv("BINANCE_WSS", "wss://fstream.binance.com/ws/btcusdt@depth20@100ms")),
 		BybitAdapter(getenv("BYBIT_WSS", "wss://stream.bybit.com/v5/public/linear")),
 		OKXAdapter(getenv("OKX_WSS", "wss://ws.okx.com:8443/ws/v5/public")),
+		OKXSwapAdapter(getenv("OKX_WSS", "wss://ws.okx.com:8443/ws/v5/public")),
 		CoinbaseAdapter(getenv("COINBASE_WSS", "wss://ws-feed.exchange.coinbase.com")),
 		KrakenAdapter(getenv("KRAKEN_WSS", "wss://ws.kraken.com/v2")),
 	}
@@ -69,7 +70,7 @@ func main() {
 
 	// --- Ajanlari baslat ---
 	var wg sync.WaitGroup
-	wg.Add(len(cexAdapters) + 4) // 5 CEX + DEX + Polymarket + Chainlink RTDS + Whale
+	wg.Add(len(cexAdapters) + 4) // CEX adapters + DEX + Polymarket + Chainlink RTDS + Whale
 	for _, a := range cexAdapters {
 		go RunCEX(rootCtx, &wg, pub, a)
 	}
@@ -93,6 +94,6 @@ func main() {
 	case <-done:
 		log.Printf("[MAIN] tum ajanlar temiz kapandi. Cikis.")
 	case <-time.After(5 * time.Second):
-		log.Printf("[MAIN] kapatma zaman asimi — zorla cikis.")
+		log.Printf("[MAIN] kapatma zaman asimi â€” zorla cikis.")
 	}
 }

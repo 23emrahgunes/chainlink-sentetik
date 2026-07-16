@@ -1,5 +1,5 @@
 // cex_client.go
-// GHOST ORACLE v5.0 :: Ajan 1.1 — Generic CEX WSS kosucusu.
+// GHOST ORACLE v5.0 :: Ajan 1.1 â€” Generic CEX WSS kosucusu.
 // Her borsa bir CEXAdapter (subscribe + parse) saglar; baglanti/reconnect/
 // keepalive/publish mantigi burada ORTAK olarak yonetilir.
 package main
@@ -29,19 +29,27 @@ func sumLevels(levels [][]string) string {
 
 // TopOfBook: en iyi bid/ask + DERINLIK toplam hacmi (OBI icin).
 type TopOfBook struct {
-	Src    string
-	BidP   string
-	BidQ   string
-	AskP   string
-	AskQ   string
-	BidVol string // tum bid seviyelerinin toplam hacmi (derinlik)
-	AskVol string // tum ask seviyelerinin toplam hacmi (derinlik)
+	Src        string
+	MarketType string // perp | spot
+	BidP       string
+	BidQ       string
+	AskP       string
+	AskQ       string
+	BidVol     string // tum bid seviyelerinin toplam hacmi (derinlik)
+	AskVol     string // tum ask seviyelerinin toplam hacmi (derinlik)
+	BidVol5    string
+	AskVol5    string
+	BidVol20   string
+	AskVol20   string
+	BidVol50   string
+	AskVol50   string
 }
 
 // CEXAdapter: bir borsanin WSS baglanti tanimi.
-//   Subscribe : baglantidan hemen sonra gonderilecek JSON mesajlar (nil olabilir).
-//   Ping      : periyodik keepalive mesaji (bos ise gonderilmez).
-//   Parse     : ham mesaji TopOfBook'a cevirir; (nil,false) -> atla (heartbeat/ack).
+//
+//	Subscribe : baglantidan hemen sonra gonderilecek JSON mesajlar (nil olabilir).
+//	Ping      : periyodik keepalive mesaji (bos ise gonderilmez).
+//	Parse     : ham mesaji TopOfBook'a cevirir; (nil,false) -> atla (heartbeat/ack).
 type CEXAdapter struct {
 	Name         string
 	URL          string
@@ -55,7 +63,7 @@ type CEXAdapter struct {
 func RunCEX(ctx context.Context, wg *sync.WaitGroup, pub *MemoryPub, a CEXAdapter) {
 	defer wg.Done()
 	if a.URL == "" {
-		log.Printf("[%s] URL bos — atlaniyor", a.Name)
+		log.Printf("[%s] URL bos â€” atlaniyor", a.Name)
 		return
 	}
 	for {
@@ -66,7 +74,7 @@ func RunCEX(ctx context.Context, wg *sync.WaitGroup, pub *MemoryPub, a CEXAdapte
 		default:
 		}
 		if err := connectCEX(ctx, pub, a); err != nil && ctx.Err() == nil {
-			log.Printf("[%s] baglanti hatasi: %v — 2s sonra yeniden", a.Name, err)
+			log.Printf("[%s] baglanti hatasi: %v â€” 2s sonra yeniden", a.Name, err)
 			select {
 			case <-ctx.Done():
 				return
@@ -130,7 +138,7 @@ func connectCEX(ctx context.Context, pub *MemoryPub, a CEXAdapter) error {
 		}
 		tob, ok := a.Parse(msg)
 		if !ok {
-			continue // heartbeat / ack / tek-tarafli delta — atla
+			continue // heartbeat / ack / tek-tarafli delta â€” atla
 		}
 		pctx, pcancel := context.WithTimeout(ctx, 500*time.Millisecond)
 		bidVol, askVol := tob.BidVol, tob.AskVol
@@ -140,7 +148,7 @@ func connectCEX(ctx context.Context, pub *MemoryPub, a CEXAdapter) error {
 		if askVol == "" {
 			askVol = tob.AskQ
 		}
-		if perr := pub.Publish(pctx, StreamCEX, map[string]interface{}{
+		values := map[string]interface{}{
 			"src":     tob.Src,
 			"bid_p":   tob.BidP,
 			"bid_q":   tob.BidQ,
@@ -149,7 +157,23 @@ func connectCEX(ctx context.Context, pub *MemoryPub, a CEXAdapter) error {
 			"bid_vol": bidVol,
 			"ask_vol": askVol,
 			"ts":      time.Now().UnixMilli(),
-		}); perr != nil && ctx.Err() == nil {
+		}
+		if tob.MarketType != "" {
+			values["market_type"] = tob.MarketType
+		}
+		if tob.BidVol5 != "" {
+			values["bid_vol_5"] = tob.BidVol5
+			values["ask_vol_5"] = tob.AskVol5
+		}
+		if tob.BidVol20 != "" {
+			values["bid_vol_20"] = tob.BidVol20
+			values["ask_vol_20"] = tob.AskVol20
+		}
+		if tob.BidVol50 != "" {
+			values["bid_vol_50"] = tob.BidVol50
+			values["ask_vol_50"] = tob.AskVol50
+		}
+		if perr := pub.Publish(pctx, StreamCEX, values); perr != nil && ctx.Err() == nil {
 			log.Printf("[%s] publish hatasi: %v", a.Name, perr)
 		}
 		pcancel()

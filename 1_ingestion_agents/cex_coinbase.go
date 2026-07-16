@@ -1,7 +1,5 @@
 // cex_coinbase.go
-// GHOST ORACLE v5.0 :: Ajan 1.1 — Coinbase Exchange adapter'i.
-// 'ticker' kanali (auth gerektirmez) en iyi bid/ask verir. App-ping gerekmez.
-// NOT: pair yoksa (BTC-USDT) coinbaseProduct'i BTC-USD yapabilirsin.
+// GHOST ORACLE v5.0 :: Ajan 1.1 - Coinbase Exchange level2_batch adapter.
 package main
 
 import (
@@ -9,40 +7,70 @@ import (
 	"sync"
 )
 
-const coinbaseProduct = "BTC-USD" // USDT cifti Coinbase'de ince; USD cok daha aktif
+const coinbaseProduct = "BTC-USD"
 
-type coinbaseTicker struct {
-	Type        string `json:"type"`
-	BestBid     string `json:"best_bid"`
-	BestBidSize string `json:"best_bid_size"`
-	BestAsk     string `json:"best_ask"`
-	BestAskSize string `json:"best_ask_size"`
+type coinbaseBookMsg struct {
+	Type      string     `json:"type"`
+	ProductID string     `json:"product_id"`
+	Bids      [][]string `json:"bids"`
+	Asks      [][]string `json:"asks"`
+	Changes   [][]string `json:"changes"` // [side, price, size]
 }
 
-var coinbasePool = sync.Pool{New: func() interface{} { return new(coinbaseTicker) }}
+var coinbasePool = sync.Pool{New: func() interface{} { return new(coinbaseBookMsg) }}
 
 func CoinbaseAdapter(url string) CEXAdapter {
+	book := newBookState()
 	return CEXAdapter{
 		Name: "coinbase",
 		URL:  url,
 		Subscribe: []string{
-			`{"type":"subscribe","product_ids":["` + coinbaseProduct + `"],"channels":["ticker"]}`,
+			`{"type":"subscribe","product_ids":["` + coinbaseProduct + `"],"channels":["level2_batch"]}`,
 		},
 		Parse: func(msg []byte) (*TopOfBook, bool) {
-			t := coinbasePool.Get().(*coinbaseTicker)
-			defer coinbasePool.Put(t)
-			*t = coinbaseTicker{}
-			if err := json.Unmarshal(msg, t); err != nil {
+			m := coinbasePool.Get().(*coinbaseBookMsg)
+			defer coinbasePool.Put(m)
+			*m = coinbaseBookMsg{}
+			if err := json.Unmarshal(msg, m); err != nil {
 				return nil, false
 			}
-			if t.Type != "ticker" || t.BestBid == "" || t.BestAsk == "" {
-				return nil, false // subscriptions / heartbeat mesajlari
+			switch m.Type {
+			case "snapshot":
+				book.Reset(m.Bids, m.Asks)
+			case "l2update":
+				bids, asks := splitCoinbaseChanges(m.Changes)
+				book.Apply(bids, asks)
+			default:
+				return nil, false
 			}
+			bids, asks := book.Snapshot(50)
+			if len(bids) == 0 || len(asks) == 0 {
+				return nil, false
+			}
+			b5, a5, b20, a20, b50, a50 := book.Totals()
 			return &TopOfBook{
-				Src:  "coinbase",
-				BidP: t.BestBid, BidQ: t.BestBidSize,
-				AskP: t.BestAsk, AskQ: t.BestAskSize,
+				Src: "coinbase", MarketType: "spot",
+				BidP: bids[0][0], BidQ: bids[0][1],
+				AskP: asks[0][0], AskQ: asks[0][1],
+				BidVol: b50, AskVol: a50,
+				BidVol5: b5, AskVol5: a5, BidVol20: b20, AskVol20: a20, BidVol50: b50, AskVol50: a50,
 			}, true
 		},
 	}
+}
+
+func splitCoinbaseChanges(changes [][]string) ([][]string, [][]string) {
+	bids, asks := [][]string{}, [][]string{}
+	for _, ch := range changes {
+		if len(ch) < 3 {
+			continue
+		}
+		lv := []string{ch[1], ch[2]}
+		if ch[0] == "buy" {
+			bids = append(bids, lv)
+		} else if ch[0] == "sell" {
+			asks = append(asks, lv)
+		}
+	}
+	return bids, asks
 }

@@ -1,7 +1,5 @@
 // agent_cex.go
-// GHOST ORACLE v5.0 :: Ajan 1.1 — Binance Futures adapter'i.
-// @depth20 payload'u dogrudan gelir (subscribe gerekmez). sync.Pool ile
-// GC baskisi minimize edilir (Banana Pi 2GB RAM).
+// GHOST ORACLE v5.0 :: Ajan 1.1 - Binance Futures adapter'i.
 package main
 
 import (
@@ -9,7 +7,6 @@ import (
 	"sync"
 )
 
-// binanceDepth: @depth20 payload'unun minimal parse struct'i.
 type binanceDepth struct {
 	Bids [][]string `json:"bids"`
 	Asks [][]string `json:"asks"`
@@ -17,7 +14,6 @@ type binanceDepth struct {
 
 var binancePool = sync.Pool{New: func() interface{} { return new(binanceDepth) }}
 
-// BinanceAdapter: URL stream path'i icerir (btcusdt@depth20@100ms), subscribe yok.
 func BinanceAdapter(url string) CEXAdapter {
 	return CEXAdapter{
 		Name: "binance",
@@ -31,11 +27,16 @@ func BinanceAdapter(url string) CEXAdapter {
 			if len(d.Bids) == 0 || len(d.Asks) == 0 {
 				return nil, false
 			}
+			b5 := sumLevels(d.Bids[:minInt(len(d.Bids), 5)])
+			a5 := sumLevels(d.Asks[:minInt(len(d.Asks), 5)])
+			b20 := sumLevels(d.Bids)
+			a20 := sumLevels(d.Asks)
 			return &TopOfBook{
-				Src:  "binance",
+				Src: "binance", MarketType: "perp",
 				BidP: d.Bids[0][0], BidQ: d.Bids[0][1],
 				AskP: d.Asks[0][0], AskQ: d.Asks[0][1],
-				BidVol: sumLevels(d.Bids), AskVol: sumLevels(d.Asks), // 20 seviye derinlik
+				BidVol: b20, AskVol: a20,
+				BidVol5: b5, AskVol5: a5, BidVol20: b20, AskVol20: a20,
 			}, true
 		},
 	}

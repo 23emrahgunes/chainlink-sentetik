@@ -459,9 +459,9 @@
         <thead>
           <tr class="text-slate-500 border-b border-slate-800 text-left">
             <th class="py-2 font-medium">Market (5dk)</th>
-            <th class="py-2 font-medium">Tahmin</th>
+            <th class="py-2 font-medium">Alınan Share</th>
             <th class="py-2 font-medium text-right">Giriş (maliyet)</th>
-            <th class="py-2 font-medium">Sonuç</th>
+            <th class="py-2 font-medium">Market Sonucu</th>
             <th class="py-2 font-medium">Durum</th>
             <th class="py-2 font-medium text-right">PnL</th>
             <th class="py-2 font-medium text-right">Net</th>
@@ -470,15 +470,15 @@
         <tbody>
           <template x-for="t in pagedTrades" :key="t.win">
             <tr class="border-b border-slate-900/60">
-              <td class="py-2 text-slate-400 tabular-nums" x-text="t.label"></td>
+              <td class="py-2 text-slate-400 tabular-nums" x-text="t.marketLabel || t.label"></td>
               <td class="py-2 font-bold"
-                  :class="t.dir === 'LONG' ? 'text-emerald-400' : 'text-rose-400'"
-                  x-text="t.dir === 'LONG' ? '▲ UP' : '▼ DOWN'"></td>
+                  :class="t.share === 'UP' ? 'text-emerald-400' : 'text-rose-400'"
+                  x-text="t.share === 'UP' ? '▲ UP' : '▼ DOWN'"></td>
               <td class="py-2 text-right tabular-nums text-slate-300"
-                  x-text="(t.entry*100).toFixed(1) + '¢'"></td>
+                  x-text="Number(t.entryCents || t.entry*100).toFixed(1) + '¢'"></td>
               <td class="py-2 font-semibold"
-                  :class="t.outcome === 'LONG' ? 'text-emerald-400' : 'text-rose-400'"
-                  x-text="t.outcome === 'LONG' ? 'UP' : 'DOWN'"></td>
+                  :class="t.result === 'UP' ? 'text-emerald-400' : 'text-rose-400'"
+                  x-text="t.result"></td>
               <td class="py-2">
                 <span class="px-2 py-0.5 rounded text-xs font-semibold"
                       :class="t.won ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'"
@@ -527,6 +527,9 @@
         synthSources: 0,      // taze borsa sayisi
         strike: null,         // price to beat (hedef)
         obi: 0,               // order book imbalance (-1..+1, derinlik baskisi)
+        perpObi: 0, spotObi: 0, mixObi: 0, perpObiDelta: 0, spotObiDelta: 0,
+        secondsLeft: 0, distanceToBeat: 0, requiredVelocity: 0, realizedVelocity: 0,
+        cheapSidePrice: null, entryScore: 0, entryReason: '',
         usdt: null,           // USDT/USD kuru
         chainlinkPrice: null, // Polymarket RTDS gercek Chainlink BTC/USD (canli)
         dexFlow: 0, dexPrice: null, dexLiq: 0, dexBuys: 0, dexSells: 0, // DEX akisi
@@ -613,6 +616,18 @@
             this.synthSources = Number(d.sources) || 0;
             if (d.strike && Number(d.strike) > 0) this.strike = Number(d.strike).toFixed(2);
             if (d.obi !== undefined) this.obi = Number(d.obi);
+            if (d.perp_obi !== undefined) this.perpObi = Number(d.perp_obi);
+            if (d.spot_obi !== undefined) this.spotObi = Number(d.spot_obi);
+            if (d.mix_obi !== undefined) this.mixObi = Number(d.mix_obi);
+            if (d.perp_obi_delta !== undefined) this.perpObiDelta = Number(d.perp_obi_delta);
+            if (d.spot_obi_delta !== undefined) this.spotObiDelta = Number(d.spot_obi_delta);
+            if (d.seconds_left !== undefined) this.secondsLeft = Number(d.seconds_left);
+            if (d.distance_to_beat !== undefined) this.distanceToBeat = Number(d.distance_to_beat);
+            if (d.required_velocity !== undefined) this.requiredVelocity = Number(d.required_velocity);
+            if (d.realized_velocity !== undefined) this.realizedVelocity = Number(d.realized_velocity);
+            if (d.cheap_side_price !== undefined) this.cheapSidePrice = Number(d.cheap_side_price);
+            if (d.entry_score !== undefined) this.entryScore = Number(d.entry_score);
+            if (d.entry_reason !== undefined) this.entryReason = d.entry_reason;
             if (d.usdt) this.usdt = Number(d.usdt).toFixed(4);
             if (d.chainlink && Number(d.chainlink) > 0) this.chainlinkPrice = Number(d.chainlink).toFixed(2);
             if (d.dex_flow !== undefined) this.dexFlow = Number(d.dex_flow);
@@ -655,9 +670,13 @@
             const label = `${hh(s.getHours())}:${hh(s.getMinutes())}-${hh(e.getHours())}:${hh(e.getMinutes())}`;
             // ayni pencere zaten varsa ekleme (gecmis + canli cakismasi)
             if (!this.tradesList.some(t => t.win === win)) {
+              const share = d.share || (d.dir === 'LONG' ? 'UP' : 'DOWN');
+              const result = d.result || (d.outcome === 'LONG' ? 'UP' : 'DOWN');
               this.tradesList.unshift({
-                win, label, dir: d.dir, outcome: d.outcome,
-                entry: Number(d.entry), won: d.won === '1',
+                win, label, marketLabel: d.market_label ? `${label} - ${d.market_label}` : label, dir: d.dir, outcome: d.outcome,
+                share, result,
+                entry: Number(d.entry), entryCents: d.entry_cents !== undefined ? Number(d.entry_cents) : Number(d.entry) * 100,
+                won: d.won === '1',
                 profit: Number(d.profit), pnl_after: Number(d.pnl_after),
                 margin: d.margin !== undefined ? Number(d.margin) : null,   // giris baglami
                 obi: d.obi !== undefined ? Number(d.obi) : null,

@@ -3,10 +3,10 @@
 //
 // Bu piyasalar 5 dakikalik ve Chainlink BTC/USD ile cozuluyor. Token id her
 // pencerede degisir. Ajan:
-//   1) zamandan aktif pencere slug'ini hesaplar (btc-updown-5m-<ts>, ts%300==0)
-//   2) gamma API'den "Up" outcome token id'sini cozer
-//   3) CLOB market WS'e abone olur, pencere bitene kadar mid (Up olasiligi) basar
-//   4) pencere bitince otomatik yeni markete gecer (rollover)
+//  1. zamandan aktif pencere slug'ini hesaplar (btc-updown-5m-<ts>, ts%300==0)
+//  2. gamma API'den "Up" outcome token id'sini cozer
+//  3. CLOB market WS'e abone olur, pencere bitene kadar mid (Up olasiligi) basar
+//  4. pencere bitince otomatik yeni markete gecer (rollover)
 //
 // stream:polymarket alanlari: src, token, up_prob(mid), window_ts, ts
 // (Statik POLYMARKET_TOKEN_ID verilirse rollover kapanir, o token kullanilir.)

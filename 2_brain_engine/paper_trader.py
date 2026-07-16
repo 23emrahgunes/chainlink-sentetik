@@ -20,6 +20,12 @@ log = logging.getLogger("brain.paper")
 WINDOW_SEC = 300  # kapanmis pencereler END zamaniyla anahtarli (start+300)
 
 
+def payout_profit(stake: float, entry_price: float, won: bool) -> float:
+    if won and entry_price > 0:
+        return stake * (1.0 / entry_price - 1.0)
+    return -stake
+
+
 class PaperTrader:
     def __init__(self, stake: float = 1.0, obi_entry: float = 0.25,
                  value_max: float = 0.90, min_entry: float = 0.05,
@@ -45,7 +51,9 @@ class PaperTrader:
         self._to_publish: list[dict] = []     # yeni settle edilenler (stream:trades icin)
 
     def update(self, win_ts: int, now_sec: int, obi: float, poly_up: float,
-               spot: float, strike: float, closed: dict, whale: float = 0.0) -> None:
+               spot: float, strike: float, closed: dict, whale: float = 0.0,
+               context: dict | None = None) -> None:
+        context = context or {}
         # 1) settle
         self._settle_pending(closed)
 
@@ -91,6 +99,7 @@ class PaperTrader:
                 slot["entry_obi"] = obi
                 slot["entry_whale"] = whale                    # balina CVD (giris ani)
                 slot["entry_sec_left"] = WINDOW_SEC - sec_in
+                slot["entry_context"] = context.copy()
                 log.info("[PAPER] REVERSAL GIRIS %s @ %.3f | OBI=%+.3f margin=%%%.4f kalan=%ds",
                          "UP" if cheap_dir == 1 else "DOWN", cheap_price, obi,
                          margin * 100, WINDOW_SEC - sec_in)
@@ -108,6 +117,7 @@ class PaperTrader:
                         slot["entry_obi"] = obi
                         slot["entry_whale"] = whale
                         slot["entry_sec_left"] = WINDOW_SEC - sec_in
+                        slot["entry_context"] = context.copy()
                         log.info("[PAPER] OBI GIRIS %s @ %.3f (OBI=%+.3f)",
                                  "UP" if direction == "LONG" else "DOWN", price, obi)
                     else:
@@ -127,18 +137,34 @@ class PaperTrader:
             outcome = "LONG" if c >= o else "SHORT"
             p = tr["entry_price"]
             won = (tr["dir"] == outcome)
-            profit = self.stake * (1.0 / p - 1.0) if (won and p > 0) else -self.stake
+            profit = payout_profit(self.stake, p, won)
             self.pnl += profit
             self.trades += 1
             self.wins += 1 if won else 0
             self.losses += 0 if won else 1
+            ctx = tr.get("entry_context", {})
+            share = "UP" if tr["dir"] == "LONG" else "DOWN"
+            result = "UP" if outcome == "LONG" else "DOWN"
             rec = {
                 "win": w, "dir": tr["dir"], "outcome": outcome,
+                "share": share, "result": result,
+                "market_label": "BTC Up/Down 5m",
+                "entry_cents": p * 100.0,
                 "won": won, "profit": profit, "entry": p, "pnl_after": self.pnl,
                 "margin": tr.get("entry_margin", -1.0),   # giris baglami (teshis)
                 "obi": tr.get("entry_obi", 0.0),
                 "whale": tr.get("entry_whale", 0.0),
                 "sec_left": tr.get("entry_sec_left", -1),
+                "distance_to_beat": ctx.get("distance_to_beat", -1.0),
+                "required_velocity": ctx.get("required_velocity", 0.0),
+                "realized_velocity": ctx.get("realized_velocity", 0.0),
+                "perp_obi": ctx.get("perp_obi", 0.0),
+                "spot_obi": ctx.get("spot_obi", 0.0),
+                "perp_obi_delta": ctx.get("perp_obi_delta", 0.0),
+                "spot_obi_delta": ctx.get("spot_obi_delta", 0.0),
+                "dex_flow": ctx.get("dex_flow", 0.0),
+                "entry_score": ctx.get("entry_score", 0.0),
+                "entry_reason": ctx.get("entry_reason", ""),
             }
             self.last = rec
             self._to_publish.append(rec)

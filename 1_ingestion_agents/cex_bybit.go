@@ -1,6 +1,5 @@
 // cex_bybit.go
-// GHOST ORACLE v5.0 :: Ajan 1.1 — Bybit v5 (linear) adapter'i.
-// orderbook.1.BTCUSDT (depth 1) abone olur; app-level ping 20s'de bir.
+// GHOST ORACLE v5.0 :: Ajan 1.1 - Bybit v5 linear depth adapter.
 package main
 
 import (
@@ -12,9 +11,10 @@ import (
 const bybitSymbol = "BTCUSDT"
 
 type bybitMsg struct {
+	Type  string `json:"type"`
 	Topic string `json:"topic"`
 	Data  struct {
-		B [][]string `json:"b"` // [ [price, size], ... ]
+		B [][]string `json:"b"`
 		A [][]string `json:"a"`
 	} `json:"data"`
 }
@@ -22,35 +22,40 @@ type bybitMsg struct {
 var bybitPool = sync.Pool{New: func() interface{} { return new(bybitMsg) }}
 
 func BybitAdapter(url string) CEXAdapter {
-	// orderbook.1 = depth 1: [0] her zaman en iyi seviye. Deltalar tek-tarafli
-	// gelebilir; son bilinen tarafi hatirla ki her guncellemede yayinlayabilelim.
-	// (Parse tek goroutine'den cagrilir — yaris yok.)
-	var bp, bq, ap, aq string
+	book := newBookState()
 	return CEXAdapter{
 		Name:         "bybit",
 		URL:          url,
-		Subscribe:    []string{`{"op":"subscribe","args":["orderbook.1.` + bybitSymbol + `"]}`},
+		Subscribe:    []string{`{"op":"subscribe","args":["orderbook.50.` + bybitSymbol + `"]}`},
 		Ping:         `{"op":"ping"}`,
 		PingInterval: 20 * time.Second,
 		Parse: func(msg []byte) (*TopOfBook, bool) {
 			m := bybitPool.Get().(*bybitMsg)
 			defer bybitPool.Put(m)
-			m.Topic = ""
-			m.Data.B, m.Data.A = nil, nil
+			*m = bybitMsg{}
 			if err := json.Unmarshal(msg, m); err != nil {
 				return nil, false
 			}
-			// Son bilinen bid/ask'i guncelle (qty "0" = seviye kaldirildi, atla).
-			if len(m.Data.B) > 0 && len(m.Data.B[0]) >= 2 && m.Data.B[0][1] != "0" {
-				bp, bq = m.Data.B[0][0], m.Data.B[0][1]
+			if m.Topic == "" || (m.Type != "snapshot" && m.Type != "delta") {
+				return nil, false
 			}
-			if len(m.Data.A) > 0 && len(m.Data.A[0]) >= 2 && m.Data.A[0][1] != "0" {
-				ap, aq = m.Data.A[0][0], m.Data.A[0][1]
+			if m.Type == "snapshot" {
+				book.Reset(m.Data.B, m.Data.A)
+			} else {
+				book.Apply(m.Data.B, m.Data.A)
 			}
-			if bp == "" || ap == "" {
-				return nil, false // henuz iki taraf da gelmedi
+			bids, asks := book.Snapshot(50)
+			if len(bids) == 0 || len(asks) == 0 {
+				return nil, false
 			}
-			return &TopOfBook{Src: "bybit", BidP: bp, BidQ: bq, AskP: ap, AskQ: aq}, true
+			b5, a5, b20, a20, b50, a50 := book.Totals()
+			return &TopOfBook{
+				Src: "bybit", MarketType: "perp",
+				BidP: bids[0][0], BidQ: bids[0][1],
+				AskP: asks[0][0], AskQ: asks[0][1],
+				BidVol: b50, AskVol: a50,
+				BidVol5: b5, AskVol5: a5, BidVol20: b20, AskVol20: a20, BidVol50: b50, AskVol50: a50,
+			}, true
 		},
 	}
 }
