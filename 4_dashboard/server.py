@@ -321,6 +321,9 @@ async def ws_endpoint(ws: WebSocket) -> None:
         rows = await client.xrange("stream:trades", count=500)
         for _id, fields in rows:
             await ws.send_json({"type": "trade", "data": fields})
+        erows = await client.xrevrange("stream:executions", count=80)
+        for _id, fields in reversed(erows):
+            await ws.send_json({"type": "execution", "data": fields})
         # Son STRADDLE snapshot (sayfa bos acilmasin).
         srows = await client.xrevrange("stream:straddle", count=1)
         for _id, fields in srows:

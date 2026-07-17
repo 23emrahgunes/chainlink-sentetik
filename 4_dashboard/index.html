@@ -462,11 +462,12 @@
     </p>
   </section>
 
-  <!-- İŞLEM GEÇMİŞİ -->
+  <!-- KAGIT ISLEM GECMISI -->
   <section class="card rounded-xl border border-slate-800 p-5 mt-6 shadow-xl">
     <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-4">
-      İşlem Geçmişi <span class="text-slate-600" x-text="'(' + tradesList.length + ')'"></span>
+      Kagit Islem Gecmisi <span class="text-slate-600" x-text="'(' + tradesList.length + ')'"></span>
     </h2>
+    <p class="text-[11px] text-slate-600 mb-4">Bu tablo paper/backtest PnL'idir; Polymarket cuzdanindaki gercek buy/redeem kaydi degildir.</p>
     <div class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
@@ -529,6 +530,46 @@
   </section>
 
 
+  <!-- CANLI EMIR AKISI -->
+  <section class="card rounded-xl border border-rose-900/50 p-5 mt-6 shadow-xl">
+    <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-1">
+      Canli Emir Akisi <span class="text-slate-600" x-text="'(' + liveExecList.length + ')'"></span>
+    </h2>
+    <p class="text-[11px] text-slate-600 mb-4">Gercek CLOB emir denemeleri: LIVE_SENT gonderildi, LIVE_BLOCKED gonderilmedi. Cuzdan PnL/redeem ayri takip edilir.</p>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-slate-500 border-b border-slate-800 text-left">
+            <th class="py-2 font-medium">Zaman</th>
+            <th class="py-2 font-medium">Yon</th>
+            <th class="py-2 font-medium text-right">P_cex</th>
+            <th class="py-2 font-medium">Durum</th>
+            <th class="py-2 font-medium">Sebep</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="e in liveExecList" :key="e.id">
+            <tr class="border-b border-slate-900/60">
+              <td class="py-2 text-slate-500 tabular-nums" x-text="e.time"></td>
+              <td class="py-2 font-bold" :class="e.dir === 'LONG' ? 'text-emerald-400' : 'text-rose-400'"
+                  x-text="e.dir === 'LONG' ? 'UP' : 'DOWN'"></td>
+              <td class="py-2 text-right tabular-nums text-slate-300" x-text="e.price"></td>
+              <td class="py-2">
+                <span class="px-2 py-0.5 rounded text-xs font-semibold"
+                      :class="e.status === 'LIVE_SENT' ? 'bg-emerald-500/15 text-emerald-300' : e.status === 'ONAYLI' ? 'bg-sky-500/15 text-sky-300' : 'bg-rose-500/15 text-rose-300'"
+                      x-text="e.status"></span>
+              </td>
+              <td class="py-2 text-slate-400 max-w-[520px] truncate" :title="e.reason" x-text="e.reason || '-'"></td>
+            </tr>
+          </template>
+          <tr x-show="liveExecList.length === 0">
+            <td colspan="5" class="py-8 text-center text-slate-600">Canli emir kaydi bekleniyor...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <div x-show="liveModalOpen" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
     <div class="card w-full max-w-md rounded-xl border border-rose-800/60 p-5 shadow-2xl">
       <h2 class="text-lg font-bold text-rose-300 tracking-wide">CANLI EMİR MODU</h2>
@@ -579,7 +620,8 @@
         lastKararDir: '',     // son karar yonu (LONG/SHORT)
         pnl: 0, trades: 0, wins: 0, losses: 0, winRate: 0, paperOpen: false,
         lastResult: false, lastDir: '', lastOutcome: '', lastWon: false, lastProfit: 0,
-        tradesList: [],       // islem gecmisi
+        tradesList: [],       // kagit islem gecmisi
+        liveExecList: [],     // canli emir akisi
         page: 1, pageSize: 20, // sayfalama (20/sayfa)
         obiHit: 0, obiN: 0, strongHit: 0, strongN: 0, contraHit: 0, contraN: 0, // OBI olcum
         perpHit: 0, spotHit: 0, mixHit: 0, whaleHit: 0, cmpN: 0, // perp/spot/balina OBI kiyas
@@ -812,11 +854,28 @@
           if (msg.type === 'execution') {         // son karari ayrica sabitle
             this.lastKarar = d.karar || 'RED';
             this.lastKararDir = d.dir === 'LONG' ? 'UP' : (d.dir === 'SHORT' ? 'DOWN' : '');
+            this.pushLiveExec(d, status);
           }
           this.pushRow(d, status);
           if (d.ts) this.latency = Math.max(0, Date.now() - Number(d.ts)); // tek cikarma
         },
 
+        pushLiveExec(d, status) {
+          const ts = Number(d.ts) || Date.now();
+          const when = new Date(ts).toLocaleTimeString('tr-TR', { hour12: false });
+          const reason = d.reason || d.hata || d.error || d.order_id || '';
+          const id = `${ts}-${d.dir || '?'}-${status}-${reason}`;
+          if (this.liveExecList.some(e => e.id === id)) return;
+          this.liveExecList.unshift({
+            id,
+            time: when,
+            dir: d.dir || '?',
+            price: d.p_cex ? Number(d.p_cex).toFixed(4) : '-',
+            status,
+            reason
+          });
+          if (this.liveExecList.length > 80) this.liveExecList.pop();
+        },
         pushRow(d, status) {
           this.totalSignals++;
           this.signals.unshift({
