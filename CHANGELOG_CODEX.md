@@ -1,5 +1,15 @@
 # CHANGELOG_CODEX
 
+## 2026-07-17 - Live entry alignment and limit diagnostics
+
+- Live execution now listens to `stream:entries` by default, which is produced only when the paper reversal trader opens an `OPEN` setup. Set `EXECUTION_STREAM=stream:signals` only if the older generic momentum trigger is intentionally needed.
+- Paper `OPEN` records now include `p_cex` and are mirrored to `stream:entries` with `window_ts`, `entry_cents`, share quantity, seconds left, OBI deltas, and entry score.
+- Live order telemetry now carries `entry`, `entry_cents`, `order_price`, `order_cents`, `poly_mid`, `window_ts`, `poly_window_ts`, and `token_id` in `stream:executions`.
+- LIVE no longer publishes a preliminary `ONAYLI` row before CLOB checks. Dashboard live order history should show only final `LIVE_SENT` or reasoned `LIVE_BLOCKED` rows.
+- Added stricter late-entry protection: `MAX_ENTRY_DRIFT_CENTS` defaults to `3`. If the live Polymarket price has moved more than this above the paper entry, the order is blocked instead of chasing.
+- Stale entries are now emitted as `LIVE_BLOCKED`/`RED` with an explicit age reason instead of being silently dropped.
+- Dashboard live order table now shows paper entry cents and attempted limit cents next to `P_cex`.
+
 ## 2026-07-16 - Reversal depth model and trade telemetry
 
 ### What changed

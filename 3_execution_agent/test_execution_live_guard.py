@@ -3,7 +3,8 @@ from types import SimpleNamespace
 
 try:
     from main_execution import (
-        _is_stale_signal, _latest_poly_snapshot, _live_block_reason,
+        EXECUTION_STREAM, STREAM_ENTRIES, _is_stale_signal,
+        _latest_poly_snapshot, _live_block_reason,
         _order_lock_key, _order_lock_ttl,
     )
 except ModuleNotFoundError as exc:
@@ -38,6 +39,9 @@ class LiveGuardTest(unittest.TestCase):
 
     def _decision(self, approved=True):
         return SimpleNamespace(approved=approved, reason="ok")
+
+    def test_default_execution_stream_is_entries(self):
+        self.assertEqual(EXECUTION_STREAM, STREAM_ENTRIES)
 
     def test_dry_run_never_blocks_as_live(self):
         reason = _live_block_reason(

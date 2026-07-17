@@ -102,6 +102,7 @@ class PaperTrader:
                 slot["entry_price"] = cheap_price
                 # TESHIS (filtreyi DEGISTIRMEZ): giris anindaki baglam.
                 slot["entry_margin"] = abs(spot - strike)      # USD
+                slot["entry_spot"] = spot
                 slot["entry_obi"] = obi
                 slot["entry_whale"] = whale                    # balina CVD (giris ani)
                 slot["entry_sec_left"] = WINDOW_SEC - sec_in
@@ -121,6 +122,7 @@ class PaperTrader:
                     if self.min_entry <= price <= self.value_max:
                         slot["dir"], slot["entry_price"] = direction, price
                         slot["entry_margin"] = abs(spot - strike) if strike > 0 else -1.0
+                        slot["entry_spot"] = spot
                         slot["entry_obi"] = obi
                         slot["entry_whale"] = whale
                         slot["entry_sec_left"] = WINDOW_SEC - sec_in
@@ -142,6 +144,7 @@ class PaperTrader:
             "win": tr["win"], "dir": tr["dir"], "outcome": "",
             "share": share, "result": "",
             "market_label": "BTC Up/Down 5m",
+            "p_cex": tr.get("entry_spot", 0.0),
             "entry_cents": p * 100.0,
             "share_qty": share_quantity(self.stake, p),
             "won": False, "profit": 0.0, "entry": p, "pnl_after": self.pnl,
@@ -188,6 +191,7 @@ class PaperTrader:
                 "win": w, "dir": tr["dir"], "outcome": outcome,
                 "share": share, "result": result,
                 "market_label": "BTC Up/Down 5m",
+                "p_cex": tr.get("entry_spot", 0.0),
                 "entry_cents": p * 100.0,
                 "share_qty": qty,
                 "won": won, "profit": profit, "entry": p, "pnl_after": self.pnl,

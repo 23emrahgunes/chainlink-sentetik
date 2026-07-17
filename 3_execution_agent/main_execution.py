@@ -39,6 +39,8 @@ logging.basicConfig(
 log = logging.getLogger("exec.main")
 
 STREAM_SIGNALS = "stream:signals"
+STREAM_ENTRIES = "stream:entries"
+EXECUTION_STREAM = os.getenv("EXECUTION_STREAM", STREAM_ENTRIES)
 STREAM_EXECUTIONS = "stream:executions"
 STREAM_POLY = "stream:polymarket"
 LIVE_STATE_KEY = "state:live"
@@ -55,7 +57,7 @@ def _truthy(value) -> bool:
 
 
 async def _emit_execution(cfg: dict, direction: str, target: float, karar: str,
-                          decision=None, gas=None, reason: str = "") -> None:
+                          decision=None, gas=None, reason: str = "", extra: dict | None = None) -> None:
     fields = {
         "dir": direction,
         "p_cex": f"{target:.8f}",
@@ -65,12 +67,16 @@ async def _emit_execution(cfg: dict, direction: str, target: float, karar: str,
         "live_armed": "1" if cfg.get("live_armed") else "0",
         "ts": str(int(time.time() * 1000)),
     }
+    if extra:
+        for key, value in extra.items():
+            if value is not None:
+                fields[str(key)] = str(value)
     if decision is not None:
         fields["slippage"] = f"{decision.slippage:.6f}"
     if gas is not None:
         fields["gas_gwei"] = f"{gwei(gas['maxFeePerGas']):.1f}"
     try:
-        await cfg["client"].xadd(STREAM_EXECUTIONS, fields, maxlen=20, approximate=True)
+        await cfg["client"].xadd(STREAM_EXECUTIONS, fields, maxlen=200, approximate=True)
     except Exception as exc:
         log.error("[EXEC] stream:executions XADD hatasi: %s", exc)
 
@@ -215,13 +221,12 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
     gas = await compute_gas(cfg["w3"], cfg["priority_gwei"])
     karar = "ONAYLI" if decision.approved else "RED"
 
-    # --- Dashboard yayini: her sinyal icin ilk karar gorunsun. ---
     cfg["live_armed"] = await _runtime_live_armed(cfg["client"], cfg.get("env_live_armed", False))
-    visible_karar = "DRY_RUN" if cfg["mode"] != "LIVE" else karar
-    await _emit_execution(cfg, direction, target, visible_karar, decision, gas, decision.reason)
 
     # LONG opens Up token; SHORT opens Down token. The stream mid is Up price.
     pm_mid, up_token_id, down_token_id, window_ts = await _latest_poly_snapshot(cfg["client"])
+    signal_window_ts = int(_f(field, "window_ts") or _f(field, "win") or 0)
+    effective_window_ts = signal_window_ts or window_ts or int(time.time() // 300 * 300)
     is_short = str(direction).upper() in {"SHORT", "DOWN"}
     live_token_id = down_token_id if is_short else up_token_id
     token_id = cfg["token_id"] or live_token_id
@@ -231,8 +236,22 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
         order_price = max(min(1.0 - pm_mid, 1.0), 1e-6)
     else:
         order_price = pm_mid
-
+    entry_price = _f(field, "entry")
+    extra = {
+        "source": field.get("source", EXECUTION_STREAM),
+        "entry": f"{entry_price:.6f}" if entry_price else "",
+        "entry_cents": field.get("entry_cents", ""),
+        "order_price": f"{order_price:.6f}",
+        "order_cents": f"{order_price * 100:.2f}",
+        "poly_mid": "" if pm_mid is None else f"{pm_mid:.6f}",
+        "window_ts": str(effective_window_ts),
+        "poly_window_ts": str(window_ts or 0),
+        "token_id": str(token_id or ""),
+        "sec_left": field.get("sec_left", ""),
+        "entry_score": field.get("entry_score", ""),
+    }
     if cfg["mode"] != "LIVE":
+        await _emit_execution(cfg, direction, target, "DRY_RUN", decision, gas, decision.reason, extra)
         # ---------- DRY_RUN ----------
         log.info(
             "DRY RUN: Tx simule edildi. "
@@ -255,22 +274,31 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
         return
 
     # ---------- LIVE ----------
+    if signal_window_ts and window_ts and signal_window_ts != window_ts:
+        reason = f"market penceresi degisti: entry {signal_window_ts} != poly {window_ts}"
+        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason, extra)
+        log.warning("LIVE_BLOCKED: %s", reason)
+        return
+    if entry_price > 0 and order_price - entry_price > cfg["max_entry_drift_price"]:
+        reason = f"entry fiyati kacti: live {order_price * 100:.1f}c > paper {entry_price * 100:.1f}c + {cfg['max_entry_drift_price'] * 100:.1f}c"
+        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason, extra)
+        log.warning("LIVE_BLOCKED: %s", reason)
+        return
     risk = await _runtime_risk_state(cfg["client"])
     live_cfg = {**cfg, "token_id": token_id}
     block_reason = _live_block_reason(live_cfg, decision, router, pm_mid, risk, order_price)
     if block_reason:
-        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, block_reason)
+        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, block_reason, extra)
         log.warning("LIVE_BLOCKED: %s", block_reason)
         return
 
     now_sec = int(time.time())
-    effective_window_ts = window_ts or int(time.time() // 300 * 300)
     lock_key = _order_lock_key(effective_window_ts, direction, token_id)
     lock_ttl = _order_lock_ttl(effective_window_ts, now_sec, cfg["order_lock_ttl_sec"])
     lock_value = f"{direction}|{token_id}|{int(time.time() * 1000)}"
     if not await _acquire_order_lock(cfg["client"], lock_key, lock_ttl, lock_value):
         reason = f"order lock active: {lock_key}"
-        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason)
+        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason, extra)
         log.warning("LIVE_BLOCKED: %s", reason)
         return
 
@@ -283,14 +311,14 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
         log.info("LIVE: CLOB emri gonderildi | Yon: %s price: %.4f maker: %s resp: %s",
                  direction, order_price, maker_addr, resp)
         await _record_live_order_state(cfg["client"], lock_key, resp, token_id, direction)
-        await _emit_execution(cfg, direction, target, "LIVE_SENT", decision, gas, "order submitted")
+        await _emit_execution(cfg, direction, target, "LIVE_SENT", decision, gas, "order submitted", extra)
     except asyncio.TimeoutError:
         reason = f"CLOB timeout {cfg['tx_timeout']}s"
-        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason)
+        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason, extra)
         log.error("LIVE: %s.", reason)
     except Exception as exc:
         reason = f"CLOB emir hatasi: {exc}"
-        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason)
+        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason, extra)
         log.error("LIVE: %s", reason)
 
 
@@ -307,6 +335,7 @@ async def run(stop: asyncio.Event) -> None:
         "order_usdc": env_float("ORDER_USDC", 1.0),
         "max_order_usdc": env_float("MAX_ORDER_USDC", 1.0),
         "max_live_entry_price": env_float("MAX_LIVE_ENTRY_CENTS", 20.0) / 100.0,
+        "max_entry_drift_price": env_float("MAX_ENTRY_DRIFT_CENTS", 3.0) / 100.0,
         "max_daily_loss_usdc": env_float("MAX_DAILY_LOSS_USDC", 10.0),
         "max_open_positions": env_int("MAX_OPEN_POSITIONS", 1),
         "env_live_armed": _truthy(os.getenv("LIVE_ARMED", "0")),
@@ -348,14 +377,14 @@ async def run(stop: asyncio.Event) -> None:
         log.error("[REDIS] ping BASARISIZ @ %s", addr)
         return
     cfg["client"] = client  # dashboard yayini icin (stream:executions)
-    log.info("[REDIS] baglandi @ %s — stream:signals dinleniyor.", addr)
+    log.info("[REDIS] baglandi @ %s - %s dinleniyor.", addr, EXECUTION_STREAM)
 
-    last_id = "$"  # sadece yeni sinyaller
+    last_id = "$"  # sadece yeni entry/sinyaller
     dropped = 0
     try:
         while not stop.is_set():
             read = asyncio.ensure_future(
-                client.xread({STREAM_SIGNALS: last_id}, count=10, block=BLOCK_MS)
+                client.xread({EXECUTION_STREAM: last_id}, count=10, block=BLOCK_MS)
             )
             stop_task = asyncio.ensure_future(stop.wait())
             done, _p = await asyncio.wait(
@@ -376,8 +405,13 @@ async def run(stop: asyncio.Event) -> None:
                     last_id = entry_id
                     ts = _f(field, "ts")
                     if ts and now_ms - ts > SIGNAL_MAX_STALE_MS:
+                        age_ms = int(now_ms - ts)
+                        cfg["live_armed"] = await _runtime_live_armed(cfg["client"], cfg.get("env_live_armed", False))
+                        reason = f"bayat entry {age_ms}ms > {SIGNAL_MAX_STALE_MS}ms"
+                        status = "LIVE_BLOCKED" if cfg["mode"] == "LIVE" else "RED"
+                        await _emit_execution(cfg, field.get("dir", "?"), _f(field, "p_cex"), status, reason=reason, extra={"source": EXECUTION_STREAM, "window_ts": field.get("window_ts", field.get("win", "")), "entry_cents": field.get("entry_cents", "")})
                         dropped += 1
-                        continue  # bayat sinyal — atla
+                        continue  # bayat entry/sinyal - gonderme
                     await handle_signal(field, cfg, router)
     finally:
         await client.aclose()

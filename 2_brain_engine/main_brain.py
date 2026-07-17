@@ -45,6 +45,31 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("brain.main")
+STREAM_ENTRIES = "stream:entries"
+
+
+def _entry_fields(rec: dict) -> dict:
+    """Paper OPEN kaydini execution icin canli giris adayina cevir."""
+    return {
+        "source": "paper_open",
+        "status": rec.get("status", "OPEN"),
+        "win": str(rec.get("win", 0)),
+        "window_ts": str(rec.get("win", 0)),
+        "dir": rec.get("dir", ""),
+        "p_cex": f"{float(rec.get('p_cex', 0.0) or 0.0):.8f}",
+        "entry": f"{float(rec.get('entry', 0.0) or 0.0):.6f}",
+        "entry_cents": f"{float(rec.get('entry_cents', 0.0) or 0.0):.2f}",
+        "share": rec.get("share", ""),
+        "share_qty": f"{float(rec.get('share_qty', 0.0) or 0.0):.6f}",
+        "market_label": rec.get("market_label", "BTC Up/Down 5m"),
+        "sec_left": str(rec.get("sec_left", -1)),
+        "distance_to_beat": f"{float(rec.get('distance_to_beat', -1.0) or -1.0):.2f}",
+        "perp_obi_delta": f"{float(rec.get('perp_obi_delta', 0.0) or 0.0):.4f}",
+        "spot_obi_delta": f"{float(rec.get('spot_obi_delta', 0.0) or 0.0):.4f}",
+        "entry_score": f"{float(rec.get('entry_score', 0.0) or 0.0):.1f}",
+        "entry_reason": rec.get("entry_reason", ""),
+        "ts": str(int(time.time() * 1000)),
+    }
 
 
 def _f(field: dict, key: str) -> float:
@@ -373,6 +398,9 @@ async def run(stop: asyncio.Event) -> None:
             # Settle edilen islemleri gecmis tablosu icin yayinla.
             for rec in trader.drain():
                 try:
+                    if rec.get("status") == "OPEN":
+                        await consumer.client.xadd(STREAM_ENTRIES, _entry_fields(rec),
+                                                   maxlen=200, approximate=True)
                     await consumer.client.xadd("stream:trades", {
                         "status": rec.get("status", "SETTLED"),
                         "win": str(rec["win"]),
@@ -386,6 +414,7 @@ async def run(stop: asyncio.Event) -> None:
                         "share": rec.get("share", "UP" if rec["dir"] == "LONG" else "DOWN"),
                         "result": rec.get("result", "UP" if rec["outcome"] == "LONG" else "DOWN"),
                         "market_label": rec.get("market_label", f"BTC Up/Down 5m {rec['win']}"),
+                        "p_cex": f"{rec.get('p_cex', 0.0):.4f}",
                         "pnl_after": f"{rec['pnl_after']:.4f}",
                         "margin": f"{rec.get('margin', -1.0):.2f}",     # giris baglami ($)
                         "obi": f"{rec.get('obi', 0.0):.4f}",

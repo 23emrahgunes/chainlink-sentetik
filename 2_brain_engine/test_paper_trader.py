@@ -29,6 +29,7 @@ class PaperPnlTest(unittest.TestCase):
         self.assertEqual(recs[0]["status"], "OPEN")
         self.assertEqual(recs[0]["share"], "DOWN")
         self.assertAlmostEqual(recs[0]["entry"], 0.10)
+        self.assertAlmostEqual(recs[0]["p_cex"], 100.05)
     def test_pnl_after_sequence(self):
         pnl = 0.0
         pnl += payout_profit(1.0, 0.025, True)
