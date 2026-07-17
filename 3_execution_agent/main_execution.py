@@ -274,6 +274,19 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
         return
 
     # ---------- LIVE ----------
+    sec_left_raw = _f(field, "sec_left", -1)
+    sec_left = int(sec_left_raw) if sec_left_raw >= 0 else max(0, int(effective_window_ts + 300 - time.time()))
+    extra["sec_left"] = str(sec_left)
+    if sec_left > cfg["max_live_seconds_left"]:
+        reason = f"erken entry: kalan {sec_left}s > max {cfg['max_live_seconds_left']}s"
+        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason, extra)
+        log.warning("LIVE_BLOCKED: %s", reason)
+        return
+    if sec_left < cfg["min_live_seconds_left"]:
+        reason = f"cok gec entry: kalan {sec_left}s < min {cfg['min_live_seconds_left']}s"
+        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason, extra)
+        log.warning("LIVE_BLOCKED: %s", reason)
+        return
     if signal_window_ts and window_ts and signal_window_ts != window_ts:
         reason = f"market penceresi degisti: entry {signal_window_ts} != poly {window_ts}"
         await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason, extra)
@@ -336,6 +349,8 @@ async def run(stop: asyncio.Event) -> None:
         "max_order_usdc": env_float("MAX_ORDER_USDC", 1.0),
         "max_live_entry_price": env_float("MAX_LIVE_ENTRY_CENTS", 20.0) / 100.0,
         "max_entry_drift_price": env_float("MAX_ENTRY_DRIFT_CENTS", 3.0) / 100.0,
+        "max_live_seconds_left": env_int("MAX_LIVE_SECONDS_LEFT", 90),
+        "min_live_seconds_left": env_int("MIN_LIVE_SECONDS_LEFT", 5),
         "max_daily_loss_usdc": env_float("MAX_DAILY_LOSS_USDC", 10.0),
         "max_open_positions": env_int("MAX_OPEN_POSITIONS", 1),
         "env_live_armed": _truthy(os.getenv("LIVE_ARMED", "0")),

@@ -7,6 +7,7 @@
 - Live order telemetry now carries `entry`, `entry_cents`, `order_price`, `order_cents`, `poly_mid`, `window_ts`, `poly_window_ts`, and `token_id` in `stream:executions`.
 - LIVE no longer publishes a preliminary `ONAYLI` row before CLOB checks. Dashboard live order history should show only final `LIVE_SENT` or reasoned `LIVE_BLOCKED` rows.
 - Added stricter late-entry protection: `MAX_ENTRY_DRIFT_CENTS` defaults to `3`. If the live Polymarket price has moved more than this above the paper entry, the order is blocked instead of chasing.
+- Added an execution-side final-window guard: `MAX_LIVE_SECONDS_LEFT=90` and `MIN_LIVE_SECONDS_LEFT=5`, so live orders cannot fire early in the market even if a bad/stale entry reaches execution.
 - Stale entries are now emitted as `LIVE_BLOCKED`/`RED` with an explicit age reason instead of being silently dropped.
 - Dashboard live order table now shows paper entry cents and attempted limit cents next to `P_cex`.
 
