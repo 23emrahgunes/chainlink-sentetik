@@ -14,6 +14,9 @@ class DashboardTradeContractTest(unittest.TestCase):
         for token in ("d.share ||", "d.result ||", "d.entry_cents", "d.share_qty", "d.market_label"):
             self.assertIn(token, self.html)
 
+    def test_market_window_uses_polymarket_et(self):
+        for token in ("formatMarketWindowET", "America/New_York", " ET"):
+            self.assertIn(token, self.html)
     def test_live_mode_controls_are_present(self):
         for text in ("CANLI MODA GEÇ", "CANLI AKTİF", "DURDUR", "LIVE yaz"):
             self.assertIn(text, self.html)
