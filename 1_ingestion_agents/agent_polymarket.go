@@ -51,29 +51,29 @@ type gammaMarket struct {
 	Closed       bool   `json:"closed"`
 }
 
-// resolveUpToken: btc-updown-5m-<ts> slug'i icin "Up" outcome token id'sini coz.
-func resolveUpToken(slug string) (string, error) {
+// resolveTokens: btc-updown-5m-<ts> slug'i icin Up/Down outcome token id'lerini coz.
+func resolveTokens(slug string) (string, string, error) {
 	resp, err := polyHTTP.Get(gammaAPI + slug)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer resp.Body.Close()
 
 	var markets []gammaMarket
 	if err := json.NewDecoder(resp.Body).Decode(&markets); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if len(markets) == 0 {
-		return "", fmt.Errorf("market bulunamadi: %s", slug)
+		return "", "", fmt.Errorf("market bulunamadi: %s", slug)
 	}
 	var ids []string
 	if err := json.Unmarshal([]byte(markets[0].ClobTokenIds), &ids); err != nil {
-		return "", err
+		return "", "", err
 	}
-	if len(ids) == 0 {
-		return "", fmt.Errorf("token yok: %s", slug)
+	if len(ids) < 2 {
+		return "", "", fmt.Errorf("up/down token yok: %s", slug)
 	}
-	return ids[0], nil // [0] = "Up", [1] = "Down"
+	return ids[0], ids[1], nil // [0] = "Up", [1] = "Down"
 }
 
 // RunPolymarketAgent: dinamik 5dk market rollover dongusu.
@@ -93,6 +93,7 @@ func RunPolymarketAgent(ctx context.Context, wg *sync.WaitGroup, pub *MemoryPub,
 		}
 
 		var token string
+		var downToken string
 		var winCtx context.Context
 		var winCancel context.CancelFunc
 		var winTS int64
@@ -100,6 +101,7 @@ func RunPolymarketAgent(ctx context.Context, wg *sync.WaitGroup, pub *MemoryPub,
 		if staticToken != "" {
 			// Statik mod — rollover yok.
 			token = staticToken
+			downToken = ""
 			winTS = 0
 			winCtx, winCancel = context.WithCancel(ctx)
 		} else {
@@ -107,7 +109,7 @@ func RunPolymarketAgent(ctx context.Context, wg *sync.WaitGroup, pub *MemoryPub,
 			now := time.Now().Unix()
 			winTS = (now / polyWindowSec) * polyWindowSec
 			slug := fmt.Sprintf("btc-updown-5m-%d", winTS)
-			t, err := resolveUpToken(slug)
+			t, dt, err := resolveTokens(slug)
 			if err != nil {
 				log.Printf("[POLY] token cozulemedi (%s): %v — 5s sonra", slug, err)
 				select {
@@ -118,6 +120,7 @@ func RunPolymarketAgent(ctx context.Context, wg *sync.WaitGroup, pub *MemoryPub,
 				continue
 			}
 			token = t
+			downToken = dt
 			// Pencere bitisinde (winTS+300) baglantiyi kapat, sonraki markete gec.
 			winEnd := time.Unix(winTS+polyWindowSec, 0)
 			winCtx, winCancel = context.WithDeadline(ctx, winEnd)
@@ -126,7 +129,7 @@ func RunPolymarketAgent(ctx context.Context, wg *sync.WaitGroup, pub *MemoryPub,
 		}
 
 		// WS'i pencere bitene / ctx iptaline kadar calistir.
-		err := connectPoly(winCtx, pub, wssURL, token, winTS)
+		err := connectPoly(winCtx, pub, wssURL, token, downToken, winTS)
 		winCancel()
 		if err != nil && ctx.Err() == nil {
 			log.Printf("[POLY] baglanti hatasi: %v", err)
@@ -139,7 +142,7 @@ func RunPolymarketAgent(ctx context.Context, wg *sync.WaitGroup, pub *MemoryPub,
 	}
 }
 
-func connectPoly(ctx context.Context, pub *MemoryPub, wssURL, tokenID string, winTS int64) error {
+func connectPoly(ctx context.Context, pub *MemoryPub, wssURL, tokenID, downTokenID string, winTS int64) error {
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -199,15 +202,17 @@ func connectPoly(ctx context.Context, pub *MemoryPub, wssURL, tokenID string, wi
 			}
 			pctx, pcancel := context.WithTimeout(ctx, 500*time.Millisecond)
 			if perr := pub.Publish(pctx, StreamPoly, map[string]interface{}{
-				"src":       "polymarket",
-				"token":     ev.AssetID,
-				"bid_p":     bidP,
-				"bid_q":     bidQ,
-				"ask_p":     askP,
-				"ask_q":     askQ,
-				"mid":       midPrice(bidP, askP), // Up olasiligi (0..1)
-				"window_ts": winTS,
-				"ts":        time.Now().UnixMilli(),
+				"src":        "polymarket",
+				"token":      ev.AssetID,
+				"up_token":   tokenID,
+				"down_token": downTokenID,
+				"bid_p":      bidP,
+				"bid_q":      bidQ,
+				"ask_p":      askP,
+				"ask_q":      askQ,
+				"mid":        midPrice(bidP, askP), // Up olasiligi (0..1)
+				"window_ts":  winTS,
+				"ts":         time.Now().UnixMilli(),
 			}); perr != nil && ctx.Err() == nil {
 				log.Printf("[POLY] publish hatasi: %v", perr)
 			}

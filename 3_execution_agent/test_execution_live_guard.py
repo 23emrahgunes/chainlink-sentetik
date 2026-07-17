@@ -48,10 +48,11 @@ class LiveGuardTest(unittest.TestCase):
         self.assertFalse(_is_stale_signal(2500, 4001, max_age_ms=2000))
 
     def test_latest_poly_snapshot_returns_mid_and_token(self):
-        client = FakePolyClient([("1-0", {"mid": "0.42", "token": "12345"})])
-        mid, token = __import__("asyncio").run(_latest_poly_snapshot(client))
+        client = FakePolyClient([("1-0", {"mid": "0.42", "up_token": "12345", "down_token": "67890"})])
+        mid, up_token, down_token = __import__("asyncio").run(_latest_poly_snapshot(client))
         self.assertEqual(mid, 0.42)
-        self.assertEqual(token, "12345")
+        self.assertEqual(up_token, "12345")
+        self.assertEqual(down_token, "67890")
 
     def test_live_requires_armed(self):
         reason = _live_block_reason(

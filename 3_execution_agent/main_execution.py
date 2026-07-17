@@ -136,21 +136,22 @@ def _is_stale_signal(ts_ms: float, now_ms: int, max_age_ms: int = SIGNAL_MAX_STA
     return bool(ts_ms and now_ms - ts_ms > max_age_ms)
 
 
-async def _latest_poly_snapshot(client) -> tuple[float | None, str]:
-    """Return latest Polymarket mid and outcome token from stream:polymarket."""
+async def _latest_poly_snapshot(client) -> tuple[float | None, str, str]:
+    """Return latest Polymarket Up mid plus Up/Down outcome tokens."""
     try:
         rows = await client.xrevrange(STREAM_POLY, count=1)
     except Exception:
-        return None, ""
+        return None, "", ""
     if not rows:
-        return None, ""
+        return None, "", ""
     _id, fields = rows[0]
-    token = str(fields.get("token", "") or "")
+    up_token = str(fields.get("up_token", "") or fields.get("token", "") or "")
+    down_token = str(fields.get("down_token", "") or "")
     try:
         mid = float(fields.get("mid", "0")) or None
     except (TypeError, ValueError):
         mid = None
-    return mid, token
+    return mid, up_token, down_token
 
 
 async def handle_signal(field: dict, cfg: dict, router) -> None:
@@ -176,10 +177,17 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
     visible_karar = "DRY_RUN" if cfg["mode"] != "LIVE" else karar
     await _emit_execution(cfg, direction, target, visible_karar, decision, gas, decision.reason)
 
-    # Emrin fiyati = gercek Polymarket mid (0..1). Yoksa 0.5 fallback (DRY gosterim).
-    pm_mid, live_token_id = await _latest_poly_snapshot(cfg["client"])
+    # LONG opens Up token; SHORT opens Down token. The stream mid is Up price.
+    pm_mid, up_token_id, down_token_id = await _latest_poly_snapshot(cfg["client"])
+    is_short = str(direction).upper() in {"SHORT", "DOWN"}
+    live_token_id = down_token_id if is_short else up_token_id
     token_id = cfg["token_id"] or live_token_id
-    order_price = pm_mid if pm_mid is not None else 0.5
+    if pm_mid is None:
+        order_price = 0.5
+    elif is_short:
+        order_price = max(min(1.0 - pm_mid, 1.0), 1e-6)
+    else:
+        order_price = pm_mid
 
     if cfg["mode"] != "LIVE":
         # ---------- DRY_RUN ----------

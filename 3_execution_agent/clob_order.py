@@ -1,22 +1,15 @@
 """
 clob_order.py
-GHOST ORACLE v5.0 :: Ajan 3.4 - Gercek Polymarket CLOB emri.
+GHOST ORACLE v5.0 :: Ajan 3.4 - Polymarket CLOB order helpers.
 
-Polymarket emirleri off-chain CLOB'a EIP-712 imzali Order struct'i olarak
-gonderilir. Bu modul:
-  - build_order()  : sinyalden Order dict'i kurar
-  - order_hash()   : EIP-712 mesaj hash'i uretir
-  - sign_order()   : EIP-712 imzasi uretir
-  - submit_order() : imzali emri CLOB API'ye POST eder
+DRY paths can still build/hash an order-like dict for observability. LIVE submit
+uses Polymarket's official py-clob-client-v2 so the wire payload and signature
+schema stay aligned with the exchange API.
 """
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import logging
 import secrets
-import time
 
 from eth_account import Account
 from eth_account.messages import encode_typed_data
@@ -67,22 +60,12 @@ def build_order(
     maker: str = ZERO_ADDR,
     signer: str | None = None,
 ) -> dict:
-    """
-    Build a Polymarket CLOB order.
-
-    maker is the Polymarket funder/proxy wallet when present; signer is the EOA
-    that signs the order. If signer is not given, maker is used for both fields.
-    """
-    side = 0 if direction == "LONG" else 1
+    """Build an order-like dict. Live orders always buy the selected outcome token."""
     signer = signer or maker
     price = max(min(price, 1.0), 1e-6)
-
-    tokens = int((size_usdc / price) * USDC_DECIMALS)
+    shares = size_usdc / price
     collateral = int(size_usdc * USDC_DECIMALS)
-    if side == 0:
-        maker_amt, taker_amt = collateral, tokens
-    else:
-        maker_amt, taker_amt = tokens, collateral
+    tokens = int(shares * USDC_DECIMALS)
 
     return {
         "salt": int.from_bytes(secrets.token_bytes(32), "big") >> 8,
@@ -90,14 +73,22 @@ def build_order(
         "signer": signer,
         "taker": ZERO_ADDR,
         "tokenId": int(token_id) if token_id else 0,
-        "makerAmount": maker_amt,
-        "takerAmount": taker_amt,
+        "makerAmount": collateral,
+        "takerAmount": tokens,
         "expiration": 0,
         "nonce": 0,
         "feeRateBps": env_int("POLY_FEE_BPS", 0),
-        "side": side,
+        "side": 0,
         "signatureType": env_int("SIGNATURE_TYPE", 0),
+        "_direction": direction,
+        "_price": price,
+        "_size_usdc": size_usdc,
+        "_shares": shares,
     }
+
+
+def _signed_order_fields(order: dict) -> dict:
+    return {k: v for k, v in order.items() if not k.startswith("_")}
 
 
 def _typed_message(order: dict) -> dict:
@@ -113,7 +104,7 @@ def _typed_message(order: dict) -> dict:
         },
         "primaryType": "Order",
         "domain": _domain(),
-        "message": order,
+        "message": _signed_order_fields(order),
     }
 
 
@@ -130,51 +121,69 @@ def sign_order(order: dict, private_key: str) -> str:
     return signed.signature.hex()
 
 
-def _l2_headers(address: str, method: str, path: str, body: str) -> dict:
-    api_key = env("POLY_API_KEY", "")
+def _api_creds():
+    key = env("POLY_API_KEY", "")
     secret = env("POLY_API_SECRET", "")
     passphrase = env("POLY_API_PASSPHRASE", "")
-    if not (api_key and secret and passphrase):
-        raise RuntimeError("POLY_API_KEY/SECRET/PASSPHRASE eksik - CLOB LIVE kapali.")
+    if not (key and secret and passphrase):
+        return None
+    try:
+        from py_clob_client_v2 import ApiCreds
+        return ApiCreds(api_key=key, api_secret=secret, api_passphrase=passphrase)
+    except Exception:
+        return {"api_key": key, "api_secret": secret, "api_passphrase": passphrase}
 
-    ts = str(int(time.time()))
-    msg = ts + method + path + body
-    sig = base64.urlsafe_b64encode(
-        hmac.new(base64.urlsafe_b64decode(secret), msg.encode(), hashlib.sha256).digest()
-    ).decode()
-    return {
-        "POLY_ADDRESS": address,
-        "POLY_SIGNATURE": sig,
-        "POLY_TIMESTAMP": ts,
-        "POLY_API_KEY": api_key,
-        "POLY_PASSPHRASE": passphrase,
-        "Content-Type": "application/json",
-    }
+
+def _sdk_submit_sync(order: dict) -> dict:
+    from py_clob_client_v2 import ClobClient, OrderArgs, OrderType, PartialCreateOrderOptions, Side
+
+    host = env("CLOB_API", "https://clob.polymarket.com")
+    key = env("WALLET_PRIVATE_KEY", "")
+    if not key:
+        raise RuntimeError("WALLET_PRIVATE_KEY bos - CLOB LIVE kapali.")
+
+    client = ClobClient(
+        host,
+        key=key,
+        chain_id=env_int("POLYGON_CHAIN_ID", 137),
+        creds=_api_creds(),
+        signature_type=env_int("SIGNATURE_TYPE", 0),
+        funder=env("FUNDER_ADDRESS", "") or order.get("maker") or None,
+    )
+    if _api_creds() is None:
+        client.set_api_creds(client.create_or_derive_api_key())
+
+    token_id = str(order["tokenId"])
+    condition_id = ""
+    try:
+        parent = client.get_market_by_token(token_id)
+        condition_id = parent.get("condition_id", "") if isinstance(parent, dict) else ""
+    except Exception as exc:
+        log.warning("CLOB market-by-token lookup failed: %s", exc)
+
+    tick_size = env("POLY_TICK_SIZE", "0.01")
+    neg_risk = str(env("POLY_NEG_RISK", "false")).strip().lower() in {"1", "true", "yes", "on"}
+    if condition_id:
+        try:
+            market = client.get_market(condition_id)
+            tick_size = str(market.get("minimum_tick_size") or tick_size)
+            neg_risk = bool(market.get("neg_risk", neg_risk))
+        except Exception as exc:
+            log.warning("CLOB get_market lookup failed: %s", exc)
+
+    return client.create_and_post_order(
+        OrderArgs(
+            token_id=token_id,
+            price=float(order["_price"]),
+            size=float(order["_shares"]),
+            side=Side.BUY,
+        ),
+        options=PartialCreateOrderOptions(tick_size=tick_size, neg_risk=neg_risk),
+        order_type=OrderType.GTC,
+    )
 
 
 async def submit_order(order: dict, signature: str, address: str, timeout_sec: float = 3.0) -> dict:
     import asyncio
-    import json
 
-    import requests
-
-    base = env("CLOB_API", "https://clob.polymarket.com")
-    path = "/order"
-    payload = {
-        "order": {**order, "signature": signature},
-        "owner": env("POLY_API_KEY", ""),
-        "orderType": "GTC",
-    }
-    body = json.dumps(payload, separators=(",", ":"))
-    headers = _l2_headers(address, "POST", path, body)
-
-    def _post() -> dict:
-        r = requests.post(base + path, data=body, headers=headers, timeout=timeout_sec)
-        if r.status_code >= 400:
-            detail = (r.text or "").strip().replace("\r", " ").replace("\n", " ")
-            if len(detail) > 240:
-                detail = detail[:237] + "..."
-            raise RuntimeError(f"{r.status_code} {r.reason} {detail}".strip())
-        return r.json()
-
-    return await asyncio.wait_for(asyncio.to_thread(_post), timeout=timeout_sec + 1)
+    return await asyncio.wait_for(asyncio.to_thread(_sdk_submit_sync, order), timeout=timeout_sec + 3)
