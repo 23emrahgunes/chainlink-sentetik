@@ -72,9 +72,33 @@ compose() {
   elif command -v docker-compose >/dev/null 2>&1; then
     docker-compose "$@"
   else
-    warn "Docker Compose is missing. Install Docker with compose plugin."
-    exit 1
+    return 127
   fi
+}
+
+start_redis() {
+  if compose up -d redis-in-memory; then
+    return 0
+  fi
+
+  warn "Docker Compose is missing; starting Redis with docker run fallback."
+  if docker ps --format '{{.Names}}' | grep -qx "$REDIS_CONTAINER"; then
+    return 0
+  fi
+  if docker ps -a --format '{{.Names}}' | grep -qx "$REDIS_CONTAINER"; then
+    docker start "$REDIS_CONTAINER" >/dev/null
+    return 0
+  fi
+  docker run -d \
+    --name "$REDIS_CONTAINER" \
+    --restart unless-stopped \
+    -p 6379:6379 \
+    --health-cmd 'redis-cli ping || exit 1' \
+    --health-interval 5s \
+    --health-timeout 3s \
+    --health-retries 20 \
+    redis:7-alpine \
+    redis-server --save '' --appendonly no >/dev/null
 }
 
 py_for() {
@@ -304,7 +328,7 @@ if [ "$DO_PULL" -eq 1 ]; then
 fi
 
 log "Starting Docker Redis"
-compose up -d redis-in-memory
+start_redis
 
 log "Waiting for Redis health"
 for i in $(seq 1 20); do
