@@ -462,80 +462,12 @@
     </p>
   </section>
 
-  <!-- KAGIT ISLEM GECMISI -->
-  <section class="card rounded-xl border border-slate-800 p-5 mt-6 shadow-xl">
-    <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-4">
-      Kagit Islem Gecmisi <span class="text-slate-600" x-text="'(' + tradesList.length + ')'"></span>
-    </h2>
-    <p class="text-[11px] text-slate-600 mb-4">Bu tablo paper/backtest PnL'idir; giris fiyati sinyal anindaki paper fiyattir, Polymarket gercek fill/buy maliyeti degildir.</p>
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="text-slate-500 border-b border-slate-800 text-left">
-            <th class="py-2 font-medium">Market (5dk)</th>
-            <th class="py-2 font-medium">Alınan Share</th>
-            <th class="py-2 font-medium text-right">Adet</th>
-            <th class="py-2 font-medium text-right">Paper Giriş</th>
-            <th class="py-2 font-medium">Market Sonucu</th>
-            <th class="py-2 font-medium">Durum</th>
-            <th class="py-2 font-medium text-right">PnL</th>
-            <th class="py-2 font-medium text-right">Net</th>
-          </tr>
-        </thead>
-        <tbody>
-          <template x-for="t in pagedTrades" :key="t.win">
-            <tr class="border-b border-slate-900/60">
-              <td class="py-2 text-slate-400 tabular-nums" x-text="t.marketLabel || t.label"></td>
-              <td class="py-2 font-bold"
-                  :class="t.share === 'UP' ? 'text-emerald-400' : 'text-rose-400'"
-                  x-text="t.share === 'UP' ? '▲ UP' : '▼ DOWN'"></td>
-              <td class="py-2 text-right tabular-nums text-slate-300"
-                  x-text="Number(t.shareQty || 0).toFixed(3)"></td>
-              <td class="py-2 text-right tabular-nums text-slate-300"
-                  x-text="Number(t.entryCents || t.entry*100).toFixed(1) + '¢'"></td>
-              <td class="py-2 font-semibold"
-                  :class="t.result === 'UP' ? 'text-emerald-400' : t.result === 'DOWN' ? 'text-rose-400' : 'text-slate-500'"
-                  x-text="t.result || '-'"></td>
-              <td class="py-2">
-                <span class="px-2 py-0.5 rounded text-xs font-semibold"
-                      :class="t.status === 'OPEN' ? 'bg-amber-500/15 text-amber-300' : t.won ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'"
-                      x-text="t.status === 'OPEN' ? 'ACIK' : (t.won ? 'KAZANDI' : 'KAYBETTI')"></span>
-              </td>
-              <td class="py-2 text-right tabular-nums font-semibold"
-                  :class="t.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'"
-                  x-text="t.status === 'OPEN' ? '-' : ((t.profit >= 0 ? '+' : '') + '$' + Number(t.profit).toFixed(3))"></td>
-              <td class="py-2 text-right tabular-nums text-slate-400"
-                  x-text="'$' + Number(t.pnl_after).toFixed(2)"></td>
-            </tr>
-          </template>
-          <tr x-show="tradesList.length === 0">
-            <td colspan="8" class="py-8 text-center text-slate-600">
-              Sonuçlanan işlem bekleniyor... <span class="pulse">▮</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <!-- Sayfalama (50/sayfa) -->
-    <div class="flex items-center justify-between mt-4 text-sm" x-show="totalPages > 1">
-      <span class="text-slate-500"
-            x-text="'Toplam ' + tradesList.length + ' işlem · sayfa ' + page + '/' + totalPages"></span>
-      <div class="flex items-center gap-2">
-        <button class="px-3 py-1 rounded border border-slate-700 text-slate-300 disabled:opacity-30 hover:bg-slate-800"
-                :disabled="page <= 1" @click="page = Math.max(1, page - 1)">‹ Önceki</button>
-        <button class="px-3 py-1 rounded border border-slate-700 text-slate-300 disabled:opacity-30 hover:bg-slate-800"
-                :disabled="page >= totalPages" @click="page = Math.min(totalPages, page + 1)">Sonraki ›</button>
-      </div>
-    </div>
-  </section>
-
-
   <!-- CANLI EMIR AKISI -->
   <section class="card rounded-xl border border-rose-900/50 p-5 mt-6 shadow-xl">
     <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-1">
-      Canli Emir Akisi <span class="text-slate-600" x-text="'(' + liveExecList.length + ')'"></span>
+      Giden Emirler <span class="text-slate-600" x-text="'(' + liveExecList.length + ')'"></span>
     </h2>
-    <p class="text-[11px] text-slate-600 mb-4">Gercek CLOB emir denemeleri: LIVE_SENT gonderildi, LIVE_BLOCKED gonderilmedi. Cuzdan PnL/redeem ayri takip edilir.</p>
+    <p class="text-[11px] text-slate-600 mb-4">Bu tablo gercek emir akisini gosterir: LIVE_SENT CLOB'a gonderildi, LIVE_BLOCKED gonderilmedi veya hata aldi. Paper islemler burada gosterilmez.</p>
     <div class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
