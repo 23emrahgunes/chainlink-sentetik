@@ -494,16 +494,16 @@
               <td class="py-2 text-right tabular-nums text-slate-300"
                   x-text="Number(t.entryCents || t.entry*100).toFixed(1) + '¢'"></td>
               <td class="py-2 font-semibold"
-                  :class="t.result === 'UP' ? 'text-emerald-400' : 'text-rose-400'"
-                  x-text="t.result"></td>
+                  :class="t.result === 'UP' ? 'text-emerald-400' : t.result === 'DOWN' ? 'text-rose-400' : 'text-slate-500'"
+                  x-text="t.result || '-'"></td>
               <td class="py-2">
                 <span class="px-2 py-0.5 rounded text-xs font-semibold"
-                      :class="t.won ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'"
-                      x-text="t.won ? 'KAZANDI' : 'KAYBETTI'"></span>
+                      :class="t.status === 'OPEN' ? 'bg-amber-500/15 text-amber-300' : t.won ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'"
+                      x-text="t.status === 'OPEN' ? 'ACIK' : (t.won ? 'KAZANDI' : 'KAYBETTI')"></span>
               </td>
               <td class="py-2 text-right tabular-nums font-semibold"
                   :class="t.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'"
-                  x-text="(t.profit >= 0 ? '+' : '') + '$' + Number(t.profit).toFixed(3)"></td>
+                  x-text="t.status === 'OPEN' ? '-' : ((t.profit >= 0 ? '+' : '') + '$' + Number(t.profit).toFixed(3))"></td>
               <td class="py-2 text-right tabular-nums text-slate-400"
                   x-text="'$' + Number(t.pnl_after).toFixed(2)"></td>
             </tr>
@@ -816,22 +816,25 @@
           if (msg.type === 'trade') {             // islem gecmisi satiri
             const win = Number(d.win);
             const label = this.formatMarketWindowET(win);
-            // ayni pencere zaten varsa ekleme (gecmis + canli cakismasi)
-            if (!this.tradesList.some(t => t.win === win)) {
-              const share = d.share || (d.dir === 'LONG' ? 'UP' : 'DOWN');
-              const result = d.result || (d.outcome === 'LONG' ? 'UP' : 'DOWN');
-              this.tradesList.unshift({
-                win, label, marketLabel: d.market_label ? `${label} - ${d.market_label}` : label, dir: d.dir, outcome: d.outcome,
-                share, result,
-                shareQty: d.share_qty !== undefined ? Number(d.share_qty) : (Number(d.entry) > 0 ? 1 / Number(d.entry) : 0),
-                entry: Number(d.entry), entryCents: d.entry_cents !== undefined ? Number(d.entry_cents) : Number(d.entry) * 100,
-                won: d.won === '1',
-                profit: Number(d.profit), pnl_after: Number(d.pnl_after),
-                margin: d.margin !== undefined ? Number(d.margin) : null,   // giris baglami
-                obi: d.obi !== undefined ? Number(d.obi) : null,
-                whale: d.whale !== undefined ? Number(d.whale) : null,
-                secLeft: d.sec_left !== undefined ? Number(d.sec_left) : null
-              });
+            const share = d.share || (d.dir === 'LONG' ? 'UP' : 'DOWN');
+            const result = d.result || (d.outcome ? (d.outcome === 'LONG' ? 'UP' : 'DOWN') : '');
+            const rec = {
+              win, label, marketLabel: d.market_label ? label + ' - ' + d.market_label : label, dir: d.dir, outcome: d.outcome,
+              status: d.status || 'SETTLED', share, result,
+              shareQty: d.share_qty !== undefined ? Number(d.share_qty) : (Number(d.entry) > 0 ? 1 / Number(d.entry) : 0),
+              entry: Number(d.entry), entryCents: d.entry_cents !== undefined ? Number(d.entry_cents) : Number(d.entry) * 100,
+              won: d.won === '1',
+              profit: Number(d.profit || 0), pnl_after: Number(d.pnl_after || 0),
+              margin: d.margin !== undefined ? Number(d.margin) : null,   // giris baglami
+              obi: d.obi !== undefined ? Number(d.obi) : null,
+              whale: d.whale !== undefined ? Number(d.whale) : null,
+              secLeft: d.sec_left !== undefined ? Number(d.sec_left) : null
+            };
+            const idx = this.tradesList.findIndex(t => t.win === win);
+            if (idx >= 0) {
+              this.tradesList[idx] = { ...this.tradesList[idx], ...rec };
+            } else {
+              this.tradesList.unshift(rec);
               if (this.tradesList.length > 500) this.tradesList.pop();
             }
             return;

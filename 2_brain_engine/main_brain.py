@@ -374,6 +374,7 @@ async def run(stop: asyncio.Event) -> None:
             for rec in trader.drain():
                 try:
                     await consumer.client.xadd("stream:trades", {
+                        "status": rec.get("status", "SETTLED"),
                         "win": str(rec["win"]),
                         "dir": rec["dir"],
                         "outcome": rec["outcome"],

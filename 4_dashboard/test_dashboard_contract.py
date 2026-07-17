@@ -17,6 +17,9 @@ class DashboardTradeContractTest(unittest.TestCase):
     def test_market_window_uses_polymarket_et(self):
         for token in ("formatMarketWindowET", "America/New_York", " ET"):
             self.assertIn(token, self.html)
+    def test_trade_history_supports_open_updates(self):
+        for token in ("d.status || 'SETTLED'", "t.status === 'OPEN'", "findIndex(t => t.win === win)"):
+            self.assertIn(token, self.html)
     def test_live_mode_controls_are_present(self):
         for text in ("CANLI MODA GEÇ", "CANLI AKTİF", "DURDUR", "LIVE yaz"):
             self.assertIn(text, self.html)
