@@ -380,6 +380,53 @@
     </p>
   </section>
 
+
+  <!-- CANLI EMIR GECMISI -->
+  <section class="card rounded-xl border border-slate-800 p-5 mt-6 shadow-xl">
+    <h2 class="text-sm uppercase tracking-widest text-slate-300 mb-1">
+      Canli Emir Gecmisi <span class="text-slate-600" x-text="'(' + liveExecList.length + ')'"></span>
+    </h2>
+    <p class="text-[11px] text-slate-500 mb-4">
+      Stratejiden execution'a ulasan emirler burada okunur halde durur. LIVE_SENT gonderildi; LIVE_BLOCKED gonderilmedi veya borsa/API tarafinda hata aldi.
+    </p>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-slate-500 border-b border-slate-800 text-left">
+            <th class="py-2 font-medium">Market</th>
+            <th class="py-2 font-medium">Alinan Share</th>
+            <th class="py-2 font-medium text-right">P_cex</th>
+            <th class="py-2 font-medium text-right">Paper</th>
+            <th class="py-2 font-medium text-right">Limit</th>
+            <th class="py-2 font-medium text-right">Kalan</th>
+            <th class="py-2 font-medium">Durum</th>
+            <th class="py-2 font-medium">Sebep</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="e in liveExecList" :key="'primary-' + e.id">
+            <tr class="border-b border-slate-900/60">
+              <td class="py-2 text-slate-400 tabular-nums" x-text="e.market"></td>
+              <td class="py-2 font-bold" :class="e.dir === 'LONG' ? 'text-emerald-400' : 'text-rose-400'" x-text="e.dir === 'LONG' ? 'UP' : 'DOWN'"></td>
+              <td class="py-2 text-right tabular-nums text-slate-300" x-text="e.price"></td>
+              <td class="py-2 text-right tabular-nums text-slate-400" x-text="e.entry"></td>
+              <td class="py-2 text-right tabular-nums text-amber-300" x-text="e.limit"></td>
+              <td class="py-2 text-right tabular-nums text-slate-400" x-text="e.secLeft"></td>
+              <td class="py-2">
+                <span class="px-2 py-0.5 rounded text-xs font-semibold"
+                      :class="e.status === 'LIVE_SENT' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'"
+                      x-text="e.status"></span>
+              </td>
+              <td class="py-2 text-slate-400 max-w-[520px] truncate" :title="e.reason" x-text="e.reason || '-'"></td>
+            </tr>
+          </template>
+          <tr x-show="liveExecList.length === 0">
+            <td colspan="8" class="py-8 text-center text-slate-600">Execution'a ulasan emir bekleniyor...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
   <!-- GİRİŞ BAĞLAMI TEŞHİSİ (kazanan vs kaybeden — girişleri kesinleştirmek için) -->
   <section class="card rounded-xl border border-violet-800/40 p-5 mt-6 shadow-xl">
     <h2 class="text-sm uppercase tracking-widest text-slate-300 mb-1">
@@ -462,12 +509,12 @@
     </p>
   </section>
 
-  <!-- CANLI EMIR AKISI -->
+  <!-- CANLI EMIR HAM LOG -->
   <section class="card rounded-xl border border-rose-900/50 p-5 mt-6 shadow-xl">
     <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-1">
-      Giden Emirler <span class="text-slate-600" x-text="'(' + liveExecList.length + ')'"></span>
+      Giden Emir Logu <span class="text-slate-600" x-text="'(' + liveExecList.length + ')'"></span>
     </h2>
-    <p class="text-[11px] text-slate-600 mb-4">Bu tablo gercek emir akisini gosterir: LIVE_SENT CLOB'a gonderildi, LIVE_BLOCKED gonderilmedi veya hata aldi. Paper islemler burada gosterilmez.</p>
+    <p class="text-[11px] text-slate-600 mb-4">Ham execution logu: blok sebebi, limit/paper farki ve CLOB/API hatalari burada akar.</p>
     <div class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead>
@@ -808,12 +855,17 @@
           const ts = Number(d.ts) || Date.now();
           const when = new Date(ts).toLocaleTimeString('tr-TR', { hour12: false });
           const reason = d.reason || d.hata || d.error || d.order_id || '';
+          const win = Number(d.window_ts || 0);
+          const market = win > 0 ? this.formatMarketWindowET(win) + ' - BTC Up/Down 5m' : '-';
+          const secLeft = d.sec_left !== undefined && d.sec_left !== '' ? Number(d.sec_left).toFixed(0) + 's' : '-';
           const id = `${ts}-${d.dir || '?'}-${status}-${reason}`;
           if (this.liveExecList.some(e => e.id === id)) return;
           this.liveExecList.unshift({
             id,
             time: when,
             dir: d.dir || '?',
+            market,
+            secLeft,
             price: d.p_cex ? Number(d.p_cex).toFixed(4) : '-',
             entry: d.entry_cents ? Number(d.entry_cents).toFixed(1) + 'c' : (d.entry ? (Number(d.entry) * 100).toFixed(1) + 'c' : '-'),
             limit: d.order_cents ? Number(d.order_cents).toFixed(1) + 'c' : (d.order_price ? (Number(d.order_price) * 100).toFixed(1) + 'c' : '-'),

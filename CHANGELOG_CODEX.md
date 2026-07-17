@@ -10,6 +10,7 @@
 - Added an execution-side final-window guard: `MAX_LIVE_SECONDS_LEFT=90` and `MIN_LIVE_SECONDS_LEFT=5`, so live orders cannot fire early in the market even if a bad/stale entry reaches execution.
 - Stale entries are now emitted as `LIVE_BLOCKED`/`RED` with an explicit age reason instead of being silently dropped.
 - Dashboard live order table now shows paper entry cents and attempted limit cents next to `P_cex`.
+- Dashboard now restores a primary history area as `Canli Emir Gecmisi`, showing execution-reached live orders separately from the lower raw `Giden Emir Logu`.
 
 ## 2026-07-16 - Reversal depth model and trade telemetry
 
