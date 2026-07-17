@@ -348,7 +348,7 @@ async def run(stop: asyncio.Event) -> None:
         "order_usdc": env_float("ORDER_USDC", 1.0),
         "max_order_usdc": env_float("MAX_ORDER_USDC", 1.0),
         "max_live_entry_price": env_float("MAX_LIVE_ENTRY_CENTS", 20.0) / 100.0,
-        "max_entry_drift_price": env_float("MAX_ENTRY_DRIFT_CENTS", 3.0) / 100.0,
+        "max_entry_drift_price": env_float("MAX_ENTRY_DRIFT_CENTS", 5.0) / 100.0,
         "max_live_seconds_left": env_int("MAX_LIVE_SECONDS_LEFT", 90),
         "min_live_seconds_left": env_int("MIN_LIVE_SECONDS_LEFT", 5),
         "max_daily_loss_usdc": env_float("MAX_DAILY_LOSS_USDC", 10.0),
