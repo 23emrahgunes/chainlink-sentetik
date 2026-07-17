@@ -2,7 +2,10 @@ import unittest
 from types import SimpleNamespace
 
 try:
-    from main_execution import _is_stale_signal, _latest_poly_snapshot, _live_block_reason
+    from main_execution import (
+        _is_stale_signal, _latest_poly_snapshot, _live_block_reason,
+        _order_lock_key, _order_lock_ttl,
+    )
 except ModuleNotFoundError as exc:
     _is_stale_signal = None
     _live_block_reason = None
@@ -48,11 +51,22 @@ class LiveGuardTest(unittest.TestCase):
         self.assertFalse(_is_stale_signal(2500, 4001, max_age_ms=2000))
 
     def test_latest_poly_snapshot_returns_mid_and_token(self):
-        client = FakePolyClient([("1-0", {"mid": "0.42", "up_token": "12345", "down_token": "67890"})])
-        mid, up_token, down_token = __import__("asyncio").run(_latest_poly_snapshot(client))
+        client = FakePolyClient([("1-0", {"mid": "0.42", "up_token": "12345", "down_token": "67890", "window_ts": "300"})])
+        mid, up_token, down_token, window_ts = __import__("asyncio").run(_latest_poly_snapshot(client))
         self.assertEqual(mid, 0.42)
         self.assertEqual(up_token, "12345")
         self.assertEqual(down_token, "67890")
+        self.assertEqual(window_ts, 300)
+
+    def test_order_lock_key_is_window_direction_token_scoped(self):
+        self.assertEqual(
+            _order_lock_key(300, "LONG", "abc"),
+            "state:order_lock:300:LONG:abc",
+        )
+
+    def test_order_lock_ttl_runs_past_window_end(self):
+        self.assertEqual(_order_lock_ttl(300, 590, fallback_sec=360), 40)
+        self.assertEqual(_order_lock_ttl(0, 590, fallback_sec=120), 120)
 
     def test_live_requires_armed(self):
         reason = _live_block_reason(

@@ -136,14 +136,14 @@ def _is_stale_signal(ts_ms: float, now_ms: int, max_age_ms: int = SIGNAL_MAX_STA
     return bool(ts_ms and now_ms - ts_ms > max_age_ms)
 
 
-async def _latest_poly_snapshot(client) -> tuple[float | None, str, str]:
-    """Return latest Polymarket Up mid plus Up/Down outcome tokens."""
+async def _latest_poly_snapshot(client) -> tuple[float | None, str, str, int]:
+    """Return latest Polymarket Up mid plus Up/Down outcome tokens and window."""
     try:
         rows = await client.xrevrange(STREAM_POLY, count=1)
     except Exception:
-        return None, "", ""
+        return None, "", "", 0
     if not rows:
-        return None, "", ""
+        return None, "", "", 0
     _id, fields = rows[0]
     up_token = str(fields.get("up_token", "") or fields.get("token", "") or "")
     down_token = str(fields.get("down_token", "") or "")
@@ -151,7 +151,50 @@ async def _latest_poly_snapshot(client) -> tuple[float | None, str, str]:
         mid = float(fields.get("mid", "0")) or None
     except (TypeError, ValueError):
         mid = None
-    return mid, up_token, down_token
+    try:
+        window_ts = int(float(fields.get("window_ts", "0") or 0))
+    except (TypeError, ValueError):
+        window_ts = 0
+    return mid, up_token, down_token, window_ts
+
+
+def _order_lock_key(window_ts: int, direction: str, token_id: str) -> str:
+    safe_dir = str(direction or "?").upper().replace(" ", "_")
+    safe_token = str(token_id or "missing")
+    return f"state:order_lock:{int(window_ts or 0)}:{safe_dir}:{safe_token}"
+
+
+def _order_lock_ttl(window_ts: int, now_sec: int, fallback_sec: int = 360) -> int:
+    if window_ts > 0:
+        return max(30, int(window_ts + 330 - now_sec))
+    return max(30, int(fallback_sec))
+
+
+async def _acquire_order_lock(client, key: str, ttl_sec: int, value: str) -> bool:
+    try:
+        return bool(await client.set(key, value, ex=ttl_sec, nx=True))
+    except Exception as exc:
+        log.error("[EXEC] order lock yazilamadi: %s", exc)
+        return False
+
+
+async def _record_live_order_state(client, lock_key: str, response, token_id: str, direction: str) -> None:
+    try:
+        order_id = ""
+        status = ""
+        if isinstance(response, dict):
+            order_id = str(response.get("orderID") or response.get("order_id") or "")
+            status = str(response.get("status") or "")
+        await client.hset(RISK_STATE_KEY, mapping={
+            "last_order_lock": lock_key,
+            "last_order_id": order_id,
+            "last_order_status": status,
+            "last_token_id": str(token_id),
+            "last_direction": str(direction),
+            "last_order_ts": str(int(time.time() * 1000)),
+        })
+    except Exception as exc:
+        log.error("[EXEC] live order state yazilamadi: %s", exc)
 
 
 async def handle_signal(field: dict, cfg: dict, router) -> None:
@@ -178,7 +221,7 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
     await _emit_execution(cfg, direction, target, visible_karar, decision, gas, decision.reason)
 
     # LONG opens Up token; SHORT opens Down token. The stream mid is Up price.
-    pm_mid, up_token_id, down_token_id = await _latest_poly_snapshot(cfg["client"])
+    pm_mid, up_token_id, down_token_id, window_ts = await _latest_poly_snapshot(cfg["client"])
     is_short = str(direction).upper() in {"SHORT", "DOWN"}
     live_token_id = down_token_id if is_short else up_token_id
     token_id = cfg["token_id"] or live_token_id
@@ -220,6 +263,16 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
         log.warning("LIVE_BLOCKED: %s", block_reason)
         return
 
+    now_sec = int(time.time())
+    lock_key = _order_lock_key(window_ts, direction, token_id)
+    lock_ttl = _order_lock_ttl(window_ts, now_sec, cfg["order_lock_ttl_sec"])
+    lock_value = f"{direction}|{token_id}|{int(time.time() * 1000)}"
+    if not await _acquire_order_lock(cfg["client"], lock_key, lock_ttl, lock_value):
+        reason = f"order lock active: {lock_key}"
+        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason)
+        log.warning("LIVE_BLOCKED: %s", reason)
+        return
+
     try:
         addr = router.account.address
         maker_addr = env("FUNDER_ADDRESS", "") or addr
@@ -228,6 +281,7 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
         resp = await submit_order(order, signature, addr, cfg["tx_timeout"])
         log.info("LIVE: CLOB emri gonderildi | Yon: %s price: %.4f maker: %s resp: %s",
                  direction, order_price, maker_addr, resp)
+        await _record_live_order_state(cfg["client"], lock_key, resp, token_id, direction)
         await _emit_execution(cfg, direction, target, "LIVE_SENT", decision, gas, "order submitted")
     except asyncio.TimeoutError:
         reason = f"CLOB timeout {cfg['tx_timeout']}s"
@@ -257,6 +311,7 @@ async def run(stop: asyncio.Event) -> None:
         "live_armed": False,
         "liquidity_usdc": env_float("POLY_LIQUIDITY_USDC", 50000.0),
         "tx_timeout": env_float("TX_TIMEOUT_SEC", 3.0),
+        "order_lock_ttl_sec": env_int("ORDER_LOCK_TTL_SEC", 360),
         "token_id": env("POLYMARKET_TOKEN_ID", ""),
         # Read-only w3 — gas base_fee icin (key gerektirmez).
         "w3": AsyncWeb3(AsyncHTTPProvider(rpc)),
