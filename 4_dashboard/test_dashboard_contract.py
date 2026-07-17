@@ -7,8 +7,11 @@ class DashboardTradeContractTest(unittest.TestCase):
         self.html = pathlib.Path("index.html").read_text(encoding="utf-8")
 
     def test_trade_history_columns_are_explicit(self):
-        for text in ("Alınan Share", "Adet", "Market Sonucu", "Giriş (maliyet)"):
+        for text in ("Alınan Share", "Adet", "Market Sonucu", "Paper Giriş"):
             self.assertIn(text, self.html)
+
+    def test_paper_entry_is_not_labeled_as_real_fill(self):
+        self.assertIn("gercek fill/buy maliyeti degildir", self.html)
 
     def test_trade_parser_supports_new_and_legacy_fields(self):
         for token in ("d.share ||", "d.result ||", "d.entry_cents", "d.share_qty", "d.market_label"):
