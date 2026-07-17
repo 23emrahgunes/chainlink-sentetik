@@ -23,6 +23,9 @@ class EnvAliasTest(unittest.TestCase):
             self.assertAlmostEqual(env_float("ORDER_USDC"), 1.25)
             self.assertEqual(env_int("POLYGON_CHAIN_ID"), 137)
 
+    def test_max_live_entry_cents_alias(self):
+        with patch.dict(os.environ, {"PM_EDGE_MAX_LIVE_ENTRY_CENTS": "20"}, clear=True):
+            self.assertAlmostEqual(env_float("MAX_LIVE_ENTRY_CENTS"), 20.0)
     def test_legacy_dry_mode_normalizes(self):
         with patch.dict(os.environ, {"PM_EDGE_MOMENTUM_EXECUTION_MODE": "dry"}, clear=True):
             self.assertEqual(normalized_mode(), "DRY_RUN")

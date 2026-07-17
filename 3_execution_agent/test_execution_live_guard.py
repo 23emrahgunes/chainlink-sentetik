@@ -28,6 +28,7 @@ class LiveGuardTest(unittest.TestCase):
             "live_armed": True,
             "order_usdc": 1.0,
             "max_order_usdc": 1.0,
+            "max_live_entry_price": 0.20,
             "max_daily_loss_usdc": 10.0,
             "max_open_positions": 1,
             "token_id": "token",
@@ -58,10 +59,10 @@ class LiveGuardTest(unittest.TestCase):
         self.assertEqual(down_token, "67890")
         self.assertEqual(window_ts, 300)
 
-    def test_order_lock_key_is_window_direction_token_scoped(self):
+    def test_order_lock_key_is_window_scoped(self):
         self.assertEqual(
             _order_lock_key(300, "LONG", "abc"),
-            "state:order_lock:300:LONG:abc",
+            "state:order_lock:300",
         )
 
     def test_order_lock_ttl_runs_past_window_end(self):
@@ -83,6 +84,15 @@ class LiveGuardTest(unittest.TestCase):
             risk={"daily_loss_usdc": 0, "open_positions": 0},
         )
         self.assertIn("ORDER_USDC", reason)
+
+    def test_live_blocks_entry_above_cent_cap(self):
+        reason = _live_block_reason(
+            self._cfg(max_live_entry_price=0.20), self._decision(),
+            router=object(), pm_mid=0.5,
+            risk={"daily_loss_usdc": 0, "open_positions": 0},
+            order_price=0.477,
+        )
+        self.assertIn("limit fiyat", reason)
 
     def test_live_blocks_daily_loss_limit(self):
         reason = _live_block_reason(

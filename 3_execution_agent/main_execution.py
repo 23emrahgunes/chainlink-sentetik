@@ -104,7 +104,7 @@ async def _runtime_risk_state(client) -> dict:
     }
 
 
-def _live_block_reason(cfg: dict, decision, router, pm_mid, risk: dict) -> str | None:
+def _live_block_reason(cfg: dict, decision, router, pm_mid, risk: dict, order_price: float | None = None) -> str | None:
     if cfg.get("mode") != "LIVE":
         return None
     if not cfg.get("live_armed"):
@@ -113,6 +113,8 @@ def _live_block_reason(cfg: dict, decision, router, pm_mid, risk: dict) -> str |
         return f"slippage red: {decision.reason}"
     if cfg["order_usdc"] > cfg["max_order_usdc"]:
         return f"ORDER_USDC {cfg['order_usdc']:.2f} > MAX_ORDER_USDC {cfg['max_order_usdc']:.2f}"
+    if order_price is not None and order_price > cfg["max_live_entry_price"]:
+        return f"limit fiyat {order_price * 100:.1f}c > max {cfg['max_live_entry_price'] * 100:.1f}c"
     if risk.get("daily_loss_usdc", 0.0) >= cfg["max_daily_loss_usdc"]:
         return f"daily loss {risk.get('daily_loss_usdc', 0.0):.2f} >= max {cfg['max_daily_loss_usdc']:.2f}"
     if risk.get("open_positions", 0) >= cfg["max_open_positions"]:
@@ -158,10 +160,8 @@ async def _latest_poly_snapshot(client) -> tuple[float | None, str, str, int]:
     return mid, up_token, down_token, window_ts
 
 
-def _order_lock_key(window_ts: int, direction: str, token_id: str) -> str:
-    safe_dir = str(direction or "?").upper().replace(" ", "_")
-    safe_token = str(token_id or "missing")
-    return f"state:order_lock:{int(window_ts or 0)}:{safe_dir}:{safe_token}"
+def _order_lock_key(window_ts: int, direction: str = "", token_id: str = "") -> str:
+    return f"state:order_lock:{int(window_ts or 0)}"
 
 
 def _order_lock_ttl(window_ts: int, now_sec: int, fallback_sec: int = 360) -> int:
@@ -257,15 +257,16 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
     # ---------- LIVE ----------
     risk = await _runtime_risk_state(cfg["client"])
     live_cfg = {**cfg, "token_id": token_id}
-    block_reason = _live_block_reason(live_cfg, decision, router, pm_mid, risk)
+    block_reason = _live_block_reason(live_cfg, decision, router, pm_mid, risk, order_price)
     if block_reason:
         await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, block_reason)
         log.warning("LIVE_BLOCKED: %s", block_reason)
         return
 
     now_sec = int(time.time())
-    lock_key = _order_lock_key(window_ts, direction, token_id)
-    lock_ttl = _order_lock_ttl(window_ts, now_sec, cfg["order_lock_ttl_sec"])
+    effective_window_ts = window_ts or int(time.time() // 300 * 300)
+    lock_key = _order_lock_key(effective_window_ts, direction, token_id)
+    lock_ttl = _order_lock_ttl(effective_window_ts, now_sec, cfg["order_lock_ttl_sec"])
     lock_value = f"{direction}|{token_id}|{int(time.time() * 1000)}"
     if not await _acquire_order_lock(cfg["client"], lock_key, lock_ttl, lock_value):
         reason = f"order lock active: {lock_key}"
@@ -305,6 +306,7 @@ async def run(stop: asyncio.Event) -> None:
         "slippage_thr": env_float("SLIPPAGE_THRESHOLD", 0.01),
         "order_usdc": env_float("ORDER_USDC", 1.0),
         "max_order_usdc": env_float("MAX_ORDER_USDC", 1.0),
+        "max_live_entry_price": env_float("MAX_LIVE_ENTRY_CENTS", 20.0) / 100.0,
         "max_daily_loss_usdc": env_float("MAX_DAILY_LOSS_USDC", 10.0),
         "max_open_positions": env_int("MAX_OPEN_POSITIONS", 1),
         "env_live_armed": _truthy(os.getenv("LIVE_ARMED", "0")),
