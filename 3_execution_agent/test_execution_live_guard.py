@@ -10,6 +10,12 @@ except ModuleNotFoundError as exc:
 else:
     MISSING = ""
 
+class FakePolyClient:
+    def __init__(self, rows):
+        self.rows = rows
+
+    async def xrevrange(self, stream, count=1):
+        return self.rows[:count]
 
 @unittest.skipIf(_live_block_reason is None, f"missing dependency: {MISSING}")
 class LiveGuardTest(unittest.TestCase):
