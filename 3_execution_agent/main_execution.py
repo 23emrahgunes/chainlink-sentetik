@@ -237,6 +237,7 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
     else:
         order_price = pm_mid
     entry_price = _f(field, "entry")
+    share_qty = cfg["order_usdc"] / order_price if order_price > 0 else 0.0
     extra = {
         "source": field.get("source", EXECUTION_STREAM),
         "entry": f"{entry_price:.6f}" if entry_price else "",
@@ -247,6 +248,8 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
         "window_ts": str(effective_window_ts),
         "poly_window_ts": str(window_ts or 0),
         "token_id": str(token_id or ""),
+        "share": "DOWN" if is_short else "UP",
+        "share_qty": f"{share_qty:.6f}",
         "sec_left": field.get("sec_left", ""),
         "entry_score": field.get("entry_score", ""),
     }
@@ -461,3 +464,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

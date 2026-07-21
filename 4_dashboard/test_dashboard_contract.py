@@ -7,9 +7,9 @@ class DashboardTradeContractTest(unittest.TestCase):
         self.html = pathlib.Path("index.html").read_text(encoding="utf-8")
 
     def test_live_order_history_is_primary_table(self):
-        for text in ("Canli Emir Gecmisi", "Execution'a ulasan emir", "LIVE_BLOCKED"):
+        for text in ("Canli Emir Gecmisi", "Execution'a ulasan emir", "LIVE_BLOCKED", "EMIR GONDERILDI", "Market Sonucu", "Adet"):
             self.assertIn(text, self.html)
-        for token in ("liveExecList", "pushLiveExec", "Giden Emir Logu"):
+        for token in ("liveExecList", "pushLiveExec", "Giden Emir Logu", "shareQty", "displayStatus", "windowTs"):
             self.assertIn(token, self.html)
 
     def test_market_window_uses_polymarket_et(self):
@@ -29,3 +29,4 @@ class DashboardTradeContractTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
