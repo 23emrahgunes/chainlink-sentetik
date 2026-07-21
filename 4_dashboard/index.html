@@ -104,6 +104,38 @@
     </div>
   </section>
 
+  <!-- GUCLU OBI WHAT-IF -->
+  <section class="card rounded-xl border border-emerald-800/40 p-5 mb-6 shadow-xl">
+    <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-1">
+      Guclu OBI Girseydik <span class="text-slate-600 normal-case tracking-normal">(what-if ? gercek emir degil)</span>
+    </h2>
+    <p class="text-[11px] text-slate-600 mb-4">Sadece |OBI| esigi, price-to-beat USD mesafesi ve son 45-90sn kosullariyla sanal girisleri olcer.</p>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+      <div><p class="text-[11px] uppercase tracking-widest text-slate-500">Islem</p><p class="text-2xl font-bold tabular-nums text-slate-200" x-text="strongObi.trades"></p></div>
+      <div><p class="text-[11px] uppercase tracking-widest text-slate-500">Isabet</p><p class="text-2xl font-bold tabular-nums" :class="strongObi.hit>=55?'text-emerald-400':strongObi.hit>0&&strongObi.hit<45?'text-rose-400':'text-slate-300'" x-text="strongObi.trades ? strongObi.hit.toFixed(1)+'%' : '?'"></p></div>
+      <div><p class="text-[11px] uppercase tracking-widest text-slate-500">Net PnL</p><p class="text-2xl font-bold tabular-nums" :class="strongObi.pnl>=0?'text-emerald-400':'text-rose-400'" x-text="(strongObi.pnl>=0?'+':'')+'$'+strongObi.pnl.toFixed(3)"></p></div>
+      <div><p class="text-[11px] uppercase tracking-widest text-slate-500">Ort. Giris</p><p class="text-2xl font-bold tabular-nums text-sky-300" x-text="strongObi.avgEntry ? (strongObi.avgEntry*100).toFixed(1)+'c' : '?'"></p></div>
+      <div><p class="text-[11px] uppercase tracking-widest text-slate-500">Acik</p><p class="text-2xl font-bold tabular-nums text-amber-300" x-text="strongObi.open"></p></div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm tabular-nums">
+        <thead><tr class="text-slate-500 border-b border-slate-800 text-right"><th class="py-2 text-left">Band</th><th>Islem</th><th>Kazanan</th><th>Isabet</th><th>Net</th><th>EV/Islem</th></tr></thead>
+        <tbody>
+          <template x-for="b in strongObi.bands" :key="b.label">
+            <tr class="border-b border-slate-900/60 text-right">
+              <td class="py-2 text-left text-slate-300" x-text="b.label"></td>
+              <td class="text-slate-400" x-text="b.n"></td>
+              <td class="text-slate-400" x-text="b.wins"></td>
+              <td class="text-slate-300" x-text="b.n ? b.hit.toFixed(1)+'%' : '?'"></td>
+              <td class="font-semibold" :class="b.net>=0?'text-emerald-400':'text-rose-400'" x-text="b.n ? (b.net>=0?'+':'')+'$'+b.net.toFixed(2) : '?'"></td>
+              <td class="font-bold" :class="b.ev>=0?'text-emerald-400':'text-rose-400'" x-text="b.n ? (b.ev>=0?'+':'')+'$'+b.ev.toFixed(3) : '?'"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <!-- PERP vs SPOT OBI (işlemsiz — derinlik sinyali hangi defterde daha iyi?) -->
   <section class="card rounded-xl border border-fuchsia-800/40 p-5 mb-6 shadow-xl">
     <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-1">
@@ -206,9 +238,10 @@
                   <span class="px-2 py-0.5 rounded text-xs font-semibold"
                         :class="{
                           'bg-sky-500/15 text-sky-300': row.status === 'SINYAL',
-                          'bg-emerald-500/15 text-emerald-300': row.status === 'ONAYLI',
-                          'bg-amber-500/15 text-amber-300': row.status === 'LIVE_SENT' || row.status === 'DRY_RUN',
-                          'bg-rose-500/15 text-rose-300': row.status === 'RED' || row.status === 'LIVE_BLOCKED'
+                          'bg-emerald-500/15 text-emerald-300': row.status === 'ONAYLI' || row.status === 'LIVE_FILLED',
+                          'bg-sky-500/15 text-sky-300': row.status === 'LIVE_SENT',
+                          'bg-amber-500/15 text-amber-300': row.status === 'DRY_RUN',
+                          'bg-rose-500/15 text-rose-300': row.status === 'RED' || row.status === 'LIVE_BLOCKED' || row.status === 'LIVE_REJECTED'
                         }"
                         x-text="row.status"></span>
                 </td>
@@ -402,6 +435,7 @@
             <th class="py-2 font-medium text-right">Market Sonucu</th>
             <th class="py-2 font-medium text-right">Kalan</th>
             <th class="py-2 font-medium">Durum</th>
+            <th class="py-2 font-medium">CLOB / Fill</th>
             <th class="py-2 font-medium">Sebep</th>
           </tr>
         </thead>
@@ -421,11 +455,12 @@
                       :class="execStatusClass(e.status)"
                       x-text="e.displayStatus"></span>
               </td>
+              <td class="py-2 text-slate-300 tabular-nums" x-text="e.clobState"></td>
               <td class="py-2 text-slate-400 max-w-[520px] truncate" :title="e.reason" x-text="e.reason || '-'"></td>
             </tr>
           </template>
           <tr x-show="liveExecList.length === 0">
-            <td colspan="10" class="py-8 text-center text-slate-600">Execution'a ulasan emir bekleniyor...</td>
+            <td colspan="11" class="py-8 text-center text-slate-600">Execution'a ulasan emir bekleniyor...</td>
           </tr>
         </tbody>
       </table>
@@ -609,6 +644,12 @@
         lastResult: false, lastDir: '', lastOutcome: '', lastWon: false, lastProfit: 0,
         tradesList: [],       // kagit islem gecmisi
         liveExecList: [],     // canli emir akisi
+        strongObi: { trades: 0, wins: 0, losses: 0, hit: 0, pnl: 0, avgEntry: 0, open: 0, bands: [
+          { label: '0-10c', n: 0, wins: 0, hit: 0, net: 0, ev: 0 },
+          { label: '10-20c', n: 0, wins: 0, hit: 0, net: 0, ev: 0 },
+          { label: '20c+', n: 0, wins: 0, hit: 0, net: 0, ev: 0 }
+        ] },
+        strongObiList: [],
         page: 1, pageSize: 20, // sayfalama (20/sayfa)
         obiHit: 0, obiN: 0, strongHit: 0, strongN: 0, contraHit: 0, contraN: 0, // OBI olcum
         perpHit: 0, spotHit: 0, mixHit: 0, whaleHit: 0, cmpN: 0, // perp/spot/balina OBI kiyas
@@ -800,6 +841,24 @@
             return;
           }
 
+          if (msg.type === 'strong_obi') {
+            this.strongObi = {
+              trades: Number(d.trades || 0), wins: Number(d.wins || 0), losses: Number(d.losses || 0),
+              hit: Number(d.hit || 0), pnl: Number(d.pnl || 0), avgEntry: Number(d.avg_entry || 0), open: Number(d.open || 0),
+              bands: [0, 1, 2].map(i => ({
+                label: d[`band${i}_label`] || ['0-10c','10-20c','20c+'][i],
+                n: Number(d[`band${i}_n`] || 0), wins: Number(d[`band${i}_wins`] || 0),
+                hit: Number(d[`band${i}_hit`] || 0), net: Number(d[`band${i}_net`] || 0), ev: Number(d[`band${i}_ev`] || 0)
+              }))
+            };
+            return;
+          }
+
+          if (msg.type === 'strong_obi_trade') {
+            this.pushStrongObiTrade(d);
+            return;
+          }
+
           if (msg.type === 'trade') {             // islem gecmisi satiri
             const win = Number(d.win);
             const label = this.formatMarketWindowET(win);
@@ -862,13 +921,15 @@
           return d.status || d.karar || d.result_status || 'RED';
         },
         execDisplayStatus(status) {
+          if (status === 'LIVE_FILLED') return 'FILL OLDU';
           if (status === 'LIVE_SENT') return 'EMIR GONDERILDI';
           if (status === 'LIVE_REJECTED') return 'EMIR REDDEDILDI';
           if (status === 'DRY_RUN') return 'DRY RUN';
           return status || '-';
         },
         execStatusClass(status) {
-          if (status === 'LIVE_SENT') return 'bg-emerald-500/15 text-emerald-300';
+          if (status === 'LIVE_FILLED') return 'bg-emerald-500/25 text-emerald-200';
+          if (status === 'LIVE_SENT') return 'bg-sky-500/15 text-sky-300';
           if (status === 'DRY_RUN') return 'bg-amber-500/15 text-amber-300';
           if (status === 'ONAYLI') return 'bg-sky-500/15 text-sky-300';
           return 'bg-rose-500/15 text-rose-300';
@@ -876,7 +937,8 @@
         pushLiveExec(d, status) {
           const ts = Number(d.ts) || Date.now();
           const when = new Date(ts).toLocaleTimeString('tr-TR', { hour12: false });
-          const reason = d.reason || d.hata || d.error || d.order_id || '';
+          const reason = d.error_reason || d.reason || d.hata || d.error || d.order_id || '';
+          const clobState = d.clob_filled === '1' ? 'fill' : d.clob_accepted === '1' ? 'accepted' : (status === 'LIVE_BLOCKED' ? 'blocked' : status === 'LIVE_REJECTED' ? 'rejected' : '-');
           const win = Number(d.window_ts || 0);
           const market = win > 0 ? this.formatMarketWindowET(win) + ' - BTC Up/Down 5m' : '-';
           const secLeft = d.sec_left !== undefined && d.sec_left !== '' ? Number(d.sec_left).toFixed(0) + 's' : '-';
@@ -901,9 +963,27 @@
             limit: d.order_cents ? Number(d.order_cents).toFixed(1) + 'c' : (d.order_price ? (Number(d.order_price) * 100).toFixed(1) + 'c' : '-'),
             status,
             displayStatus,
+            clobState,
             reason
           });
           if (this.liveExecList.length > 80) this.liveExecList.pop();
+        },
+        pushStrongObiTrade(d) {
+          const win = Number(d.win || 0);
+          const id = d._stream_id || ['strong', win, d.status || ''].join('-');
+          if (this.strongObiList.some(e => e.id === id)) return;
+          this.strongObiList.unshift({
+            id, win,
+            share: d.share || (d.dir === 'LONG' ? 'UP' : 'DOWN'),
+            result: d.result || (d.outcome ? (d.outcome === 'LONG' ? 'UP' : 'DOWN') : ''),
+            entry: Number(d.entry || 0),
+            won: d.won === '1',
+            profit: Number(d.profit || 0),
+            obi: Number(d.obi || 0),
+            distance: Number(d.distance_to_beat || 0),
+            secLeft: Number(d.sec_left || 0)
+          });
+          if (this.strongObiList.length > 500) this.strongObiList.pop();
         },
         pushRow(d, status) {
           this.totalSignals++;

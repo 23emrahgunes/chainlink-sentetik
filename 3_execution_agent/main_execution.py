@@ -120,6 +120,9 @@ def _live_block_reason(cfg: dict, decision, router, pm_mid, risk: dict, order_pr
         return f"slippage red: {decision.reason}"
     if cfg["order_usdc"] > cfg["max_order_usdc"]:
         return f"ORDER_USDC {cfg['order_usdc']:.2f} > MAX_ORDER_USDC {cfg['max_order_usdc']:.2f}"
+    min_order = float(cfg.get("clob_min_order_usdc", 0.0) or 0.0)
+    if min_order > 0 and cfg["order_usdc"] < min_order:
+        return f"ORDER_USDC {cfg['order_usdc']:.2f} < CLOB_MIN_ORDER_USDC {min_order:.2f}"
     if order_price is not None and order_price > cfg["max_live_entry_price"]:
         return f"limit fiyat {order_price * 100:.1f}c > max {cfg['max_live_entry_price'] * 100:.1f}c"
     if risk.get("daily_loss_usdc", 0.0) >= cfg["max_daily_loss_usdc"]:
@@ -210,6 +213,7 @@ def _clob_response_result(response) -> dict:
         "status": "",
         "reason": "CLOB response order id veya success icermiyor",
         "raw": "",
+        "filled": False,
     }
     try:
         result["raw"] = json.dumps(response, ensure_ascii=False, sort_keys=True)[:1200]
@@ -224,19 +228,27 @@ def _clob_response_result(response) -> dict:
     status = str(response.get("status") or response.get("state") or "")
     error = response.get("error") or response.get("errorMsg") or response.get("error_message") or response.get("message")
     success = response.get("success")
+    filled_raw = response.get("filled") or response.get("is_filled") or response.get("matched")
+    filled_size = response.get("filled_size") or response.get("matched_size") or response.get("filledSize")
 
     result["order_id"] = order_id
     result["status"] = status
+    try:
+        result["filled"] = _truthy(filled_raw) or float(filled_size or 0) > 0
+    except (TypeError, ValueError):
+        result["filled"] = _truthy(filled_raw)
+    if status.upper() in {"FILLED", "FILL", "MATCHED"}:
+        result["filled"] = True
     if success is False or error:
         result["reason"] = str(error or "CLOB success=false")
         return result
     if order_id or success is True:
         result["accepted"] = True
-        result["reason"] = "CLOB accepted"
+        result["reason"] = "CLOB filled" if result["filled"] else "CLOB accepted"
         return result
-    if status.upper() in {"OPEN", "LIVE", "MATCHED", "INSERTED", "ACCEPTED"}:
+    if status.upper() in {"OPEN", "LIVE", "MATCHED", "INSERTED", "ACCEPTED", "FILLED"}:
         result["accepted"] = True
-        result["reason"] = "CLOB accepted"
+        result["reason"] = "CLOB filled" if result["filled"] else "CLOB accepted"
         return result
     return result
 
@@ -282,6 +294,8 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
         "entry_cents": field.get("entry_cents", ""),
         "order_price": f"{order_price:.6f}",
         "order_cents": f"{order_price * 100:.2f}",
+        "limit_cents": f"{order_price * 100:.2f}",
+        "paper_cents": field.get("entry_cents", ""),
         "poly_mid": "" if pm_mid is None else f"{pm_mid:.6f}",
         "window_ts": str(effective_window_ts),
         "poly_window_ts": str(window_ts or 0),
@@ -367,17 +381,20 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
             "order_id": result["order_id"],
             "order_status": result["status"],
             "clob_accepted": "1" if result["accepted"] else "0",
+            "clob_filled": "1" if result.get("filled") else "0",
             "clob_response": result["raw"],
+            "error_reason": "" if result["accepted"] else result["reason"],
         })
         await _record_live_order_state(cfg["client"], lock_key, resp, token_id, direction)
         if result["accepted"]:
-            log.info("LIVE_SENT: CLOB kabul etti | Yon: %s price: %.4f maker: %s order_id=%s status=%s resp=%s",
-                     direction, order_price, maker_addr, result["order_id"] or "-", result["status"] or "-", resp)
+            final_status = "LIVE_FILLED" if result.get("filled") else "LIVE_SENT"
+            log.info("%s: CLOB kabul etti | Yon: %s price: %.4f maker: %s order_id=%s status=%s resp=%s",
+                     final_status, direction, order_price, maker_addr, result["order_id"] or "-", result["status"] or "-", resp)
             accepted_reason = (
-                f"CLOB accepted order_id={result['order_id'] or '-'} "
+                f"{result['reason']} order_id={result['order_id'] or '-'} "
                 f"status={result['status'] or '-'}"
             )
-            await _emit_execution(cfg, direction, target, "LIVE_SENT", decision, gas, accepted_reason, extra)
+            await _emit_execution(cfg, direction, target, final_status, decision, gas, accepted_reason, extra)
         else:
             reason = f"CLOB emir reddi: {result['reason']}"
             log.error("LIVE_REJECTED: %s | resp=%s", reason, resp)
@@ -404,6 +421,7 @@ async def run(stop: asyncio.Event) -> None:
         "slippage_thr": env_float("SLIPPAGE_THRESHOLD", 0.01),
         "order_usdc": env_float("ORDER_USDC", 1.0),
         "max_order_usdc": env_float("MAX_ORDER_USDC", 1.0),
+        "clob_min_order_usdc": env_float("CLOB_MIN_ORDER_USDC", 1.0),
         "max_live_entry_price": env_float("MAX_LIVE_ENTRY_CENTS", 20.0) / 100.0,
         "max_entry_drift_price": env_float("MAX_ENTRY_DRIFT_CENTS", 5.0) / 100.0,
         "max_live_seconds_left": env_int("MAX_LIVE_SECONDS_LEFT", 90),

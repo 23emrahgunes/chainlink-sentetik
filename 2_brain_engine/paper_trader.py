@@ -32,6 +32,158 @@ def payout_profit(stake: float, entry_price: float, won: bool) -> float:
     return -stake
 
 
+class StrongObiSimulator:
+    """What-if simulator: enter once per 5m window when strong OBI supports a reversal."""
+
+    def __init__(self, stake: float = 1.0, obi_entry: float = 0.25,
+                 min_entry: float = 0.02, max_entry: float = 0.20,
+                 min_sec_left: int = 45, max_sec_left: int = 90,
+                 distance_max_usd: float = 200.0, whale_opposite_max: float = 25.0) -> None:
+        self.stake = stake
+        self.obi_entry = obi_entry
+        self.min_entry = min_entry
+        self.max_entry = max_entry
+        self.min_sec_left = min_sec_left
+        self.max_sec_left = max_sec_left
+        self.distance_max_usd = distance_max_usd
+        self.whale_opposite_max = whale_opposite_max
+        self.pending: list[dict] = []
+        self.open_windows: set[int] = set()
+        self.settled_windows: set[int] = set()
+        self._to_publish: list[dict] = []
+        self.pnl = 0.0
+        self.trades = 0
+        self.wins = 0
+        self.losses = 0
+        self.entry_sum = 0.0
+        self.bands = [
+            {"label": "0-10c", "lo": 0.0, "hi": 0.10, "n": 0, "wins": 0, "net": 0.0},
+            {"label": "10-20c", "lo": 0.10, "hi": 0.20, "n": 0, "wins": 0, "net": 0.0},
+            {"label": "20c+", "lo": 0.20, "hi": 1.01, "n": 0, "wins": 0, "net": 0.0},
+        ]
+
+    def update(self, win_ts: int, now_sec: int, obi: float, poly_up: float,
+               spot: float, strike: float, closed: dict, whale: float = 0.0,
+               context: dict | None = None) -> None:
+        context = context or {}
+        self._settle_pending(closed)
+        if win_ts in self.open_windows or win_ts in self.settled_windows:
+            return
+        if poly_up is None or poly_up < 0 or spot <= 0 or strike <= 0:
+            return
+        sec_left = max(0, win_ts + WINDOW_SEC - now_sec)
+        if sec_left < self.min_sec_left or sec_left > self.max_sec_left:
+            return
+        if abs(obi) < self.obi_entry:
+            return
+        distance = abs(spot - strike)
+        if self.distance_max_usd > 0 and distance > self.distance_max_usd:
+            return
+        # Reversal direction must point back toward price-to-beat.
+        if spot > strike and obi >= 0:
+            return
+        if spot < strike and obi <= 0:
+            return
+        direction = "LONG" if obi > 0 else "SHORT"
+        price = poly_up if direction == "LONG" else 1.0 - poly_up
+        if price < self.min_entry or price > self.max_entry:
+            return
+        if direction == "LONG" and whale < -self.whale_opposite_max:
+            return
+        if direction == "SHORT" and whale > self.whale_opposite_max:
+            return
+        rec = {
+            "status": "OPEN",
+            "win": win_ts,
+            "dir": direction,
+            "outcome": "",
+            "share": "UP" if direction == "LONG" else "DOWN",
+            "result": "",
+            "market_label": "BTC Up/Down 5m",
+            "p_cex": spot,
+            "entry": price,
+            "entry_cents": price * 100.0,
+            "share_qty": share_quantity(self.stake, price),
+            "won": False,
+            "profit": 0.0,
+            "pnl_after": self.pnl,
+            "obi": obi,
+            "beat_path_obi": context.get("beat_path_obi", obi),
+            "distance_to_beat": distance,
+            "sec_left": sec_left,
+            "entry_score": context.get("entry_score", 0.0),
+            "entry_reason": context.get("entry_reason", ""),
+            "whale": whale,
+        }
+        self.open_windows.add(win_ts)
+        self.pending.append(rec)
+        self._to_publish.append(rec.copy())
+        log.info("[STRONG_OBI] WHAT-IF GIRIS %s @ %.3f | OBI=%+.3f distance=$%.1f kalan=%ds",
+                 rec["share"], price, obi, distance, sec_left)
+
+    def _settle_pending(self, closed: dict) -> None:
+        still = []
+        for rec in self.pending:
+            win_ts = rec["win"]
+            end_ts = win_ts + WINDOW_SEC
+            if end_ts not in closed:
+                still.append(rec)
+                continue
+            o, c = closed[end_ts]
+            outcome = "LONG" if c >= o else "SHORT"
+            won = rec["dir"] == outcome
+            profit = payout_profit(self.stake, rec["entry"], won)
+            self.pnl += profit
+            self.trades += 1
+            self.wins += 1 if won else 0
+            self.losses += 0 if won else 1
+            self.entry_sum += rec["entry"]
+            self.settled_windows.add(win_ts)
+            settled = {**rec, "status": "SETTLED", "outcome": outcome,
+                       "result": "UP" if outcome == "LONG" else "DOWN",
+                       "won": won, "profit": profit, "pnl_after": self.pnl}
+            self._add_band(rec["entry"], won, profit)
+            self._to_publish.append(settled)
+            log.info("[STRONG_OBI] SETTLE %d: tahmin=%s sonuc=%s -> %s %+.3f$ | net=%.3f$",
+                     win_ts, rec["share"], settled["result"], "KAZANDI" if won else "KAYBETTI", profit, self.pnl)
+        self.pending = still
+
+    def _add_band(self, entry: float, won: bool, profit: float) -> None:
+        entry = round(float(entry), 6)
+        for band in self.bands:
+            if band["lo"] <= entry < band["hi"]:
+                band["n"] += 1
+                band["wins"] += 1 if won else 0
+                band["net"] += profit
+                return
+
+    def drain(self) -> list[dict]:
+        recs, self._to_publish = self._to_publish, []
+        return recs
+
+    def snapshot(self) -> dict:
+        hit = (self.wins / self.trades * 100.0) if self.trades else 0.0
+        avg_entry = (self.entry_sum / self.trades) if self.trades else 0.0
+        data = {
+            "trades": str(self.trades),
+            "wins": str(self.wins),
+            "losses": str(self.losses),
+            "hit": f"{hit:.1f}",
+            "pnl": f"{self.pnl:.4f}",
+            "avg_entry": f"{avg_entry:.4f}",
+            "open": str(len(self.pending)),
+        }
+        for idx, band in enumerate(self.bands):
+            n = band["n"]
+            data[f"band{idx}_label"] = band["label"]
+            data[f"band{idx}_n"] = str(n)
+            data[f"band{idx}_wins"] = str(band["wins"])
+            data[f"band{idx}_hit"] = f"{(band['wins'] / n * 100.0) if n else 0.0:.1f}"
+            data[f"band{idx}_net"] = f"{band['net']:.4f}"
+            data[f"band{idx}_ev"] = f"{(band['net'] / n) if n else 0.0:.4f}"
+        return data
+
+
 class PaperTrader:
     def __init__(self, stake: float = 1.0, obi_entry: float = 0.25,
                  value_max: float = 0.90, min_entry: float = 0.05,

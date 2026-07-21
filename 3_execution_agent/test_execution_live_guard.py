@@ -79,6 +79,19 @@ class LiveGuardTest(unittest.TestCase):
         self.assertFalse(result["accepted"])
         self.assertIn("order id", result["reason"])
 
+    def test_clob_response_marks_filled_status(self):
+        result = _clob_response_result({"orderID": "abc", "status": "FILLED"})
+        self.assertTrue(result["accepted"])
+        self.assertTrue(result["filled"])
+
+    def test_live_blocks_below_clob_min_order(self):
+        reason = _live_block_reason(
+            self._cfg(order_usdc=0.80, clob_min_order_usdc=1.0), self._decision(),
+            router=object(), pm_mid=0.5,
+            risk={"daily_loss_usdc": 0, "open_positions": 0},
+        )
+        self.assertIn("CLOB_MIN_ORDER_USDC", reason)
+
     def test_order_lock_key_is_window_scoped(self):
         self.assertEqual(
             _order_lock_key(300, "LONG", "abc"),

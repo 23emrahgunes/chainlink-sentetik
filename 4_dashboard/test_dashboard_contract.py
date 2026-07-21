@@ -7,7 +7,7 @@ class DashboardTradeContractTest(unittest.TestCase):
         self.html = pathlib.Path("index.html").read_text(encoding="utf-8")
 
     def test_live_order_history_is_primary_table(self):
-        for text in ("Canli Emir Gecmisi", "Execution'a ulasan emir", "LIVE_BLOCKED", "EMIR GONDERILDI", "EMIR REDDEDILDI", "Market Sonucu", "Adet"):
+        for text in ("Canli Emir Gecmisi", "Execution'a ulasan emir", "LIVE_BLOCKED", "EMIR GONDERILDI", "EMIR REDDEDILDI", "FILL OLDU", "Market Sonucu", "Adet", "CLOB / Fill"):
             self.assertIn(text, self.html)
         for token in ("liveExecList", "pushLiveExec", "Giden Emir Logu", "shareQty", "displayStatus", "windowTs", "execStatus", "_stream_id"):
             self.assertIn(token, self.html)
@@ -26,7 +26,10 @@ class DashboardTradeContractTest(unittest.TestCase):
         for endpoint in ("/api/live/status", "/api/live/arm", "/api/live/disarm"):
             self.assertIn(endpoint, self.html)
 
+    def test_strong_obi_panel_contract(self):
+        for text in ("Guclu OBI Girseydik", "strongObi", "strong_obi", "strong_obi_trade", "CLOB / Fill"):
+            self.assertIn(text, self.html)
+
 
 if __name__ == "__main__":
     unittest.main()
-
