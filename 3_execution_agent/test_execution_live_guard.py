@@ -5,7 +5,7 @@ try:
     from main_execution import (
         EXECUTION_STREAM, STREAM_ENTRIES, _is_stale_signal,
         _latest_poly_snapshot, _live_block_reason,
-        _order_lock_key, _order_lock_ttl,
+        _clob_response_result, _order_lock_key, _order_lock_ttl,
     )
 except ModuleNotFoundError as exc:
     _is_stale_signal = None
@@ -62,6 +62,22 @@ class LiveGuardTest(unittest.TestCase):
         self.assertEqual(up_token, "12345")
         self.assertEqual(down_token, "67890")
         self.assertEqual(window_ts, 300)
+
+
+    def test_clob_response_accepts_order_id(self):
+        result = _clob_response_result({"orderID": "abc", "status": "OPEN"})
+        self.assertTrue(result["accepted"])
+        self.assertEqual(result["order_id"], "abc")
+
+    def test_clob_response_rejects_error_payload(self):
+        result = _clob_response_result({"success": False, "errorMsg": "bad order"})
+        self.assertFalse(result["accepted"])
+        self.assertIn("bad order", result["reason"])
+
+    def test_clob_response_rejects_empty_payload(self):
+        result = _clob_response_result({})
+        self.assertFalse(result["accepted"])
+        self.assertIn("order id", result["reason"])
 
     def test_order_lock_key_is_window_scoped(self):
         self.assertEqual(

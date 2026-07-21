@@ -387,7 +387,7 @@
       Canli Emir Gecmisi <span class="text-slate-600" x-text="'(' + liveExecList.length + ')'"></span>
     </h2>
     <p class="text-[11px] text-slate-500 mb-4">
-      Stratejiden execution'a ulasan emirler burada okunur halde durur. EMIR GONDERILDI, CLOB'a post edildi demektir; fill/gercek alim garantisi degildir. Market sonucu kapanista UP/DOWN olarak islenir.
+      Stratejiden execution'a ulasan emirler burada okunur halde durur. EMIR GONDERILDI, CLOB'un emri kabul ettigini gosterir; fill/gercek alim icin Polymarket activity kontrol edilir. LIVE_REJECTED CLOB/API tarafindan reddedilen emirdir.
     </p>
     <div class="overflow-x-auto">
       <table class="w-full text-sm">
@@ -863,11 +863,13 @@
         },
         execDisplayStatus(status) {
           if (status === 'LIVE_SENT') return 'EMIR GONDERILDI';
+          if (status === 'LIVE_REJECTED') return 'EMIR REDDEDILDI';
           if (status === 'DRY_RUN') return 'DRY RUN';
           return status || '-';
         },
         execStatusClass(status) {
-          if (status === 'LIVE_SENT' || status === 'DRY_RUN') return 'bg-amber-500/15 text-amber-300';
+          if (status === 'LIVE_SENT') return 'bg-emerald-500/15 text-emerald-300';
+          if (status === 'DRY_RUN') return 'bg-amber-500/15 text-amber-300';
           if (status === 'ONAYLI') return 'bg-sky-500/15 text-sky-300';
           return 'bg-rose-500/15 text-rose-300';
         },

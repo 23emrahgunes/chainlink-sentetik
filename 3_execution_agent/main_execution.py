@@ -12,6 +12,7 @@ KISIT: Private key yalnizca .env'den (poly_router icinde), koda gomulmez.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -186,21 +187,58 @@ async def _acquire_order_lock(client, key: str, ttl_sec: int, value: str) -> boo
 
 async def _record_live_order_state(client, lock_key: str, response, token_id: str, direction: str) -> None:
     try:
-        order_id = ""
-        status = ""
-        if isinstance(response, dict):
-            order_id = str(response.get("orderID") or response.get("order_id") or "")
-            status = str(response.get("status") or "")
+        result = _clob_response_result(response)
         await client.hset(RISK_STATE_KEY, mapping={
             "last_order_lock": lock_key,
-            "last_order_id": order_id,
-            "last_order_status": status,
+            "last_order_id": result["order_id"],
+            "last_order_status": result["status"],
+            "last_order_accepted": "1" if result["accepted"] else "0",
+            "last_order_error": result["reason"],
             "last_token_id": str(token_id),
             "last_direction": str(direction),
             "last_order_ts": str(int(time.time() * 1000)),
         })
     except Exception as exc:
         log.error("[EXEC] live order state yazilamadi: %s", exc)
+
+
+def _clob_response_result(response) -> dict:
+    """Normalize Polymarket CLOB response into accepted/rejected telemetry."""
+    result = {
+        "accepted": False,
+        "order_id": "",
+        "status": "",
+        "reason": "CLOB response order id veya success icermiyor",
+        "raw": "",
+    }
+    try:
+        result["raw"] = json.dumps(response, ensure_ascii=False, sort_keys=True)[:1200]
+    except Exception:
+        result["raw"] = str(response)[:1200]
+
+    if not isinstance(response, dict):
+        result["reason"] = f"CLOB beklenmeyen response tipi: {type(response).__name__}"
+        return result
+
+    order_id = str(response.get("orderID") or response.get("order_id") or response.get("id") or "")
+    status = str(response.get("status") or response.get("state") or "")
+    error = response.get("error") or response.get("errorMsg") or response.get("error_message") or response.get("message")
+    success = response.get("success")
+
+    result["order_id"] = order_id
+    result["status"] = status
+    if success is False or error:
+        result["reason"] = str(error or "CLOB success=false")
+        return result
+    if order_id or success is True:
+        result["accepted"] = True
+        result["reason"] = "CLOB accepted"
+        return result
+    if status.upper() in {"OPEN", "LIVE", "MATCHED", "INSERTED", "ACCEPTED"}:
+        result["accepted"] = True
+        result["reason"] = "CLOB accepted"
+        return result
+    return result
 
 
 async def handle_signal(field: dict, cfg: dict, router) -> None:
@@ -324,18 +362,34 @@ async def handle_signal(field: dict, cfg: dict, router) -> None:
         order = build_order(direction, token_id, order_price, cfg["order_usdc"], maker=maker_addr, signer=addr)
         signature = sign_order(order, env("WALLET_PRIVATE_KEY", ""))
         resp = await submit_order(order, signature, addr, cfg["tx_timeout"])
-        log.info("LIVE: CLOB emri gonderildi | Yon: %s price: %.4f maker: %s resp: %s",
-                 direction, order_price, maker_addr, resp)
+        result = _clob_response_result(resp)
+        extra.update({
+            "order_id": result["order_id"],
+            "order_status": result["status"],
+            "clob_accepted": "1" if result["accepted"] else "0",
+            "clob_response": result["raw"],
+        })
         await _record_live_order_state(cfg["client"], lock_key, resp, token_id, direction)
-        await _emit_execution(cfg, direction, target, "LIVE_SENT", decision, gas, "order submitted", extra)
+        if result["accepted"]:
+            log.info("LIVE_SENT: CLOB kabul etti | Yon: %s price: %.4f maker: %s order_id=%s status=%s resp=%s",
+                     direction, order_price, maker_addr, result["order_id"] or "-", result["status"] or "-", resp)
+            accepted_reason = (
+                f"CLOB accepted order_id={result['order_id'] or '-'} "
+                f"status={result['status'] or '-'}"
+            )
+            await _emit_execution(cfg, direction, target, "LIVE_SENT", decision, gas, accepted_reason, extra)
+        else:
+            reason = f"CLOB emir reddi: {result['reason']}"
+            log.error("LIVE_REJECTED: %s | resp=%s", reason, resp)
+            await _emit_execution(cfg, direction, target, "LIVE_REJECTED", decision, gas, reason, extra)
     except asyncio.TimeoutError:
         reason = f"CLOB timeout {cfg['tx_timeout']}s"
-        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason, extra)
-        log.error("LIVE: %s.", reason)
+        await _emit_execution(cfg, direction, target, "LIVE_REJECTED", decision, gas, reason, extra)
+        log.error("LIVE_REJECTED: %s.", reason)
     except Exception as exc:
         reason = f"CLOB emir hatasi: {exc}"
-        await _emit_execution(cfg, direction, target, "LIVE_BLOCKED", decision, gas, reason, extra)
-        log.error("LIVE: %s", reason)
+        await _emit_execution(cfg, direction, target, "LIVE_REJECTED", decision, gas, reason, extra)
+        log.error("LIVE_REJECTED: %s", reason)
 
 
 async def run(stop: asyncio.Event) -> None:
