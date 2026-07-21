@@ -225,7 +225,7 @@ async def redis_pump() -> None:
                 msg_type = STREAMS.get(stream_name, "unknown")
                 for entry_id, fields in entries:
                     last_ids[stream_name] = entry_id
-                    await manager.broadcast({"type": msg_type, "data": fields})
+                    await manager.broadcast({"type": msg_type, "id": entry_id, "data": {**fields, "_stream_id": entry_id}})
         except asyncio.CancelledError:
             break
         except Exception as exc:
@@ -320,16 +320,16 @@ async def ws_endpoint(ws: WebSocket) -> None:
         # Gecmis islemleri en eskiden yeniye sirayla gonder (tablo dolsun).
         rows = await client.xrange("stream:trades", count=500)
         for _id, fields in rows:
-            await ws.send_json({"type": "trade", "data": fields})
+            await ws.send_json({"type": "trade", "id": _id, "data": {**fields, "_stream_id": _id}})
         erows = await client.xrevrange("stream:executions", count=80)
         for _id, fields in reversed(erows):
-            await ws.send_json({"type": "execution", "data": fields})
+            await ws.send_json({"type": "execution", "id": _id, "data": {**fields, "_stream_id": _id}})
         # Son STRADDLE snapshot (sayfa bos acilmasin).
         srows = await client.xrevrange("stream:straddle", count=1)
         for _id, fields in srows:
             await ws.send_json({"type": "straddle", "data": fields})
-    except Exception:
-        pass
+    except Exception as exc:
+        log.error("ws initial history hatasi: %s", exc)
     finally:
         await client.aclose()
 

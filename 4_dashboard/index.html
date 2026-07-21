@@ -418,7 +418,7 @@
               <td class="py-2 text-right tabular-nums text-slate-400" x-text="e.secLeft"></td>
               <td class="py-2">
                 <span class="px-2 py-0.5 rounded text-xs font-semibold"
-                      :class="e.status === 'LIVE_SENT' ? 'bg-amber-500/15 text-amber-300' : 'bg-rose-500/15 text-rose-300'"
+                      :class="execStatusClass(e.status)"
                       x-text="e.displayStatus"></span>
               </td>
               <td class="py-2 text-slate-400 max-w-[520px] truncate" :title="e.reason" x-text="e.reason || '-'"></td>
@@ -543,7 +543,7 @@
               <td class="py-2 text-right tabular-nums text-amber-300" x-text="e.limit"></td>
               <td class="py-2">
                 <span class="px-2 py-0.5 rounded text-xs font-semibold"
-                      :class="e.status === 'LIVE_SENT' ? 'bg-amber-500/15 text-amber-300' : e.status === 'ONAYLI' ? 'bg-sky-500/15 text-sky-300' : 'bg-rose-500/15 text-rose-300'"
+                      :class="execStatusClass(e.status)"
                       x-text="e.status"></span>
               </td>
               <td class="py-2 text-slate-400 max-w-[520px] truncate" :title="e.reason" x-text="e.reason || '-'"></td>
@@ -848,9 +848,9 @@
           }
 
           // signal veya execution -> tabloya satir
-          const status = msg.type === 'execution' ? (d.karar || 'RED') : 'SINYAL';
+          const status = msg.type === 'execution' ? this.execStatus(d) : 'SINYAL';
           if (msg.type === 'execution') {         // son karari ayrica sabitle
-            this.lastKarar = d.karar || 'RED';
+            this.lastKarar = status;
             this.lastKararDir = d.dir === 'LONG' ? 'UP' : (d.dir === 'SHORT' ? 'DOWN' : '');
             this.pushLiveExec(d, status);
           }
@@ -858,6 +858,19 @@
           if (d.ts) this.latency = Math.max(0, Date.now() - Number(d.ts)); // tek cikarma
         },
 
+        execStatus(d) {
+          return d.status || d.karar || d.result_status || 'RED';
+        },
+        execDisplayStatus(status) {
+          if (status === 'LIVE_SENT') return 'EMIR GONDERILDI';
+          if (status === 'DRY_RUN') return 'DRY RUN';
+          return status || '-';
+        },
+        execStatusClass(status) {
+          if (status === 'LIVE_SENT' || status === 'DRY_RUN') return 'bg-amber-500/15 text-amber-300';
+          if (status === 'ONAYLI') return 'bg-sky-500/15 text-sky-300';
+          return 'bg-rose-500/15 text-rose-300';
+        },
         pushLiveExec(d, status) {
           const ts = Number(d.ts) || Date.now();
           const when = new Date(ts).toLocaleTimeString('tr-TR', { hour12: false });
@@ -868,8 +881,8 @@
           const share = d.share || (d.dir === 'LONG' ? 'UP' : d.dir === 'SHORT' ? 'DOWN' : '-');
           const result = d.result || (d.outcome ? (d.outcome === 'LONG' ? 'UP' : 'DOWN') : '-');
           const qty = Number(d.share_qty || 0);
-          const displayStatus = status === 'LIVE_SENT' ? 'EMIR GONDERILDI' : status;
-          const id = `${ts}-${d.dir || '?'}-${status}-${reason}`;
+          const displayStatus = this.execDisplayStatus(status);
+          const id = d._stream_id || [ts, d.dir || '?', status, reason].join('-');
           if (this.liveExecList.some(e => e.id === id)) return;
           this.liveExecList.unshift({
             id,
