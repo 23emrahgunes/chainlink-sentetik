@@ -37,7 +37,7 @@ class PaperTrader:
                  value_max: float = 0.90, min_entry: float = 0.05,
                  lock_at_sec: int = 90, strategy: str = "dip",
                  dip_max: float = 0.30, reversal_window_sec: int = 60,
-                 margin_max: float = 0.0012) -> None:
+                 distance_max_usd: float = 80.0, margin_max: float = 0.0012) -> None:
         self.stake = stake
         self.strategy = strategy      # "dip" (OBI-teyitli reversal) | "obi" (derinlik yonu)
         self.obi_entry = obi_entry    # reversal teyidi icin |OBI| esigi
@@ -46,7 +46,8 @@ class PaperTrader:
         self.dip_max = dip_max        # ucuz taraf bu ustundeyse dip degil (market ~50/50)
         self.lock_at = lock_at_sec    # obi modu: karar zamani
         self.rev_win = reversal_window_sec  # dip: son N sn'de reversal ara
-        self.margin_max = margin_max  # |spot-beat|/beat bu altindaysa flip mumkun (yakin)
+        self.distance_max_usd = distance_max_usd  # |spot-beat| USD mesafesi bu altindaysa flip mumkun
+        self.margin_max = margin_max              # legacy fallback: distance_max_usd <= 0 ise kullanilir
         self.pnl = 0.0
         self.trades = 0
         self.wins = 0
@@ -85,7 +86,9 @@ class PaperTrader:
                     slot["locked"], slot["dir"] = True, "PAS"
                 return
             price_dir = 1 if spot >= strike else -1          # su an kazanan yon
-            margin = abs(spot - strike) / strike
+            distance = abs(spot - strike)
+            margin = distance / strike
+            max_distance = self.distance_max_usd if self.distance_max_usd > 0 else strike * self.margin_max
             up_price, down_price = poly_up, 1.0 - poly_up
             cheap_dir = 1 if up_price <= down_price else -1
             cheap_price = up_price if cheap_dir == 1 else down_price
@@ -95,7 +98,7 @@ class PaperTrader:
                      and obi_dir == cheap_dir
                      and abs(obi) >= self.obi_entry
                      and self.min_entry <= cheap_price <= self.dip_max
-                     and margin <= self.margin_max)
+                     and distance <= max_distance)
             if setup:
                 slot["locked"] = True
                 slot["dir"] = "LONG" if cheap_dir == 1 else "SHORT"
@@ -108,9 +111,9 @@ class PaperTrader:
                 slot["entry_sec_left"] = WINDOW_SEC - sec_in
                 slot["entry_context"] = context.copy()
                 self._to_publish.append(self._open_record(slot))
-                log.info("[PAPER] REVERSAL GIRIS %s @ %.3f | OBI=%+.3f margin=%%%.4f kalan=%ds",
+                log.info("[PAPER] REVERSAL GIRIS %s @ %.3f | OBI=%+.3f distance=$%.1f margin=%%%.4f kalan=%ds",
                          "UP" if cheap_dir == 1 else "DOWN", cheap_price, obi,
-                         margin * 100, WINDOW_SEC - sec_in)
+                         distance, margin * 100, WINDOW_SEC - sec_in)
             elif sec_in >= WINDOW_SEC - 2:
                 slot["locked"], slot["dir"] = True, "PAS"
         else:  # "obi": derinlik yonu

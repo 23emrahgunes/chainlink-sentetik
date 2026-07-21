@@ -30,6 +30,26 @@ class PaperPnlTest(unittest.TestCase):
         self.assertEqual(recs[0]["share"], "DOWN")
         self.assertAlmostEqual(recs[0]["entry"], 0.10)
         self.assertAlmostEqual(recs[0]["p_cex"], 100.05)
+
+    def test_usd_distance_blocks_far_price_to_beat(self):
+        trader = PaperTrader(
+            stake=1.0,
+            obi_entry=0.25,
+            min_entry=0.05,
+            dip_max=0.30,
+            distance_max_usd=80.0,
+        )
+        trader.update(
+            win_ts=0,
+            now_sec=250,
+            obi=-0.30,
+            poly_up=0.90,
+            spot=220.0,
+            strike=100.0,
+            closed={},
+        )
+        self.assertEqual(trader.drain(), [])
+
     def test_pnl_after_sequence(self):
         pnl = 0.0
         pnl += payout_profit(1.0, 0.025, True)

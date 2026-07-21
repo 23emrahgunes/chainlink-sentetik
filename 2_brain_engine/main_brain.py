@@ -176,6 +176,7 @@ async def run(stop: asyncio.Event) -> None:
         dip_max=float(os.getenv("DIP_MAX", "0.30")),
         lock_at_sec=_lock_at,
         reversal_window_sec=int(os.getenv("REVERSAL_WINDOW_SEC", "60")),
+        distance_max_usd=float(os.getenv("MAX_DISTANCE_TO_BEAT_USD", os.getenv("REVERSAL_DISTANCE_MAX_USD", "80"))),
         margin_max=float(os.getenv("REVERSAL_MARGIN_MAX", "0.0012")))
     # OBI diverjans/isabet olcumu (islemsiz) â€” edge var mi ampirik.
     meter = SignalMeter(sample_at_sec=int(os.getenv("SIGNAL_SAMPLE_SEC", "90")),

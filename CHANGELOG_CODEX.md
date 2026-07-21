@@ -1,5 +1,10 @@
 # CHANGELOG_CODEX
 
+## 2026-07-17 - USD price-to-beat distance filter
+
+- Reversal paper/live entry now uses `MAX_DISTANCE_TO_BEAT_USD` as the primary distance filter instead of percent margin.
+- Default max distance is `$80`; set `MAX_DISTANCE_TO_BEAT_USD=120` if deliberately testing farther flip setups.
+- `REVERSAL_MARGIN_MAX` remains only as a legacy fallback when the USD distance cap is disabled.
 ## 2026-07-17 - USD-distance CEX depth bands
 
 - CEX ingestion now publishes price-distance depth bands in addition to the old level-count fields.
