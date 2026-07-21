@@ -38,7 +38,8 @@ class StrongObiSimulator:
     def __init__(self, stake: float = 1.0, obi_entry: float = 0.25,
                  min_entry: float = 0.02, max_entry: float = 0.20,
                  min_sec_left: int = 45, max_sec_left: int = 90,
-                 distance_max_usd: float = 200.0, whale_opposite_max: float = 25.0) -> None:
+                 distance_max_usd: float = 200.0, spot_min: float = 0.0,
+                 whale_min: float = 0.0, perp_against_max: float = 0.08) -> None:
         self.stake = stake
         self.obi_entry = obi_entry
         self.min_entry = min_entry
@@ -46,7 +47,9 @@ class StrongObiSimulator:
         self.min_sec_left = min_sec_left
         self.max_sec_left = max_sec_left
         self.distance_max_usd = distance_max_usd
-        self.whale_opposite_max = whale_opposite_max
+        self.spot_min = spot_min
+        self.whale_min = whale_min
+        self.perp_against_max = perp_against_max
         self.pending: list[dict] = []
         self.open_windows: set[int] = set()
         self.settled_windows: set[int] = set()
@@ -85,12 +88,22 @@ class StrongObiSimulator:
         if spot < strike and obi <= 0:
             return
         direction = "LONG" if obi > 0 else "SHORT"
+        spot_obi = float(context.get("spot_obi", 0.0) or 0.0)
+        perp_delta = float(context.get("perp_obi_delta", 0.0) or 0.0)
+        if direction == "LONG" and spot_obi < self.spot_min:
+            return
+        if direction == "SHORT" and spot_obi > -self.spot_min:
+            return
+        if direction == "LONG" and whale < self.whale_min:
+            return
+        if direction == "SHORT" and whale > -self.whale_min:
+            return
+        if direction == "LONG" and perp_delta < -self.perp_against_max:
+            return
+        if direction == "SHORT" and perp_delta > self.perp_against_max:
+            return
         price = poly_up if direction == "LONG" else 1.0 - poly_up
         if price < self.min_entry or price > self.max_entry:
-            return
-        if direction == "LONG" and whale < -self.whale_opposite_max:
-            return
-        if direction == "SHORT" and whale > self.whale_opposite_max:
             return
         rec = {
             "status": "OPEN",
@@ -109,6 +122,8 @@ class StrongObiSimulator:
             "pnl_after": self.pnl,
             "obi": obi,
             "beat_path_obi": context.get("beat_path_obi", obi),
+            "spot_obi": spot_obi,
+            "perp_obi_delta": perp_delta,
             "distance_to_beat": distance,
             "sec_left": sec_left,
             "entry_score": context.get("entry_score", 0.0),

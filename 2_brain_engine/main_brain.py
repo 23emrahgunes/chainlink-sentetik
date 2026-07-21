@@ -243,7 +243,9 @@ async def run(stop: asyncio.Event) -> None:
         min_sec_left=int(os.getenv("STRONG_OBI_MIN_SEC_LEFT", "45")),
         max_sec_left=int(os.getenv("STRONG_OBI_MAX_SEC_LEFT", "90")),
         distance_max_usd=float(os.getenv("STRONG_OBI_DISTANCE_MAX_USD", os.getenv("MAX_DISTANCE_TO_BEAT_USD", "200"))),
-        whale_opposite_max=float(os.getenv("STRONG_OBI_WHALE_OPPOSITE_MAX", "25")))
+        spot_min=float(os.getenv("STRONG_OBI_SPOT_MIN", "0.0")),
+        whale_min=float(os.getenv("STRONG_OBI_WHALE_MIN", "0.0")),
+        perp_against_max=float(os.getenv("STRONG_OBI_PERP_AGAINST_MAX", "0.08")))
     # OBI diverjans/isabet olcumu (islemsiz) Ã¢â‚¬â€ edge var mi ampirik.
     meter = SignalMeter(sample_at_sec=int(os.getenv("SIGNAL_SAMPLE_SEC", "90")),
                         strong=obi_entry)
@@ -389,23 +391,27 @@ async def run(stop: asyncio.Event) -> None:
                 poly_up = -1.0
             cheap_side_price = min(poly_up, 1.0 - poly_up) if poly_up >= 0 else -1.0
             velocity_ok = 1.0 if realized_velocity >= required_velocity else 0.0
-            beat_reversal = 1.0 if (spot_ref < strike and beat_path_obi > 0) or (spot_ref > strike and beat_path_obi < 0) else 0.0
+            reversal_dir = "LONG" if spot_ref < strike else "SHORT" if spot_ref > strike else cand_dir
+            beat_reversal = 1.0 if (reversal_dir == "LONG" and beat_path_obi > 0) or (reversal_dir == "SHORT" and beat_path_obi < 0) else 0.0
             distance_score_max = float(os.getenv("ENTRY_DISTANCE_SCORE_MAX_USD", os.getenv("MAX_DISTANCE_TO_BEAT_USD", "200")))
             distance_fit = 1.0 - min(distance_to_beat / max(distance_score_max, 1.0), 1.0)
-            perp_reversal = 1.0 if (cand_dir == "LONG" and perp_obi_delta > 0) or (cand_dir == "SHORT" and perp_obi_delta < 0) else 0.0
-            spot_confirm = 1.0 if (cand_dir == "LONG" and obi_spot_ema >= -0.05) or (cand_dir == "SHORT" and obi_spot_ema <= 0.05) else 0.0
+            spot_threshold = float(os.getenv("SPOT_REVERSAL_OBI_MIN", "0.0"))
+            whale_threshold = float(os.getenv("WHALE_REVERSAL_MIN_BTC", "0.0"))
+            perp_against_threshold = float(os.getenv("PERP_AGAINST_DELTA_WARN", "0.08"))
+            spot_confirm = 1.0 if (reversal_dir == "LONG" and obi_spot_ema >= spot_threshold) or (reversal_dir == "SHORT" and obi_spot_ema <= -spot_threshold) else 0.0
             whale_now = whale.signal(now_ms)
-            whale_confirm = 1.0 if (cand_dir == "LONG" and whale_now >= 0) or (cand_dir == "SHORT" and whale_now <= 0) else 0.0
-            dex_confirm = 1.0 if (cand_dir == "LONG" and dex.flow >= 0) or (cand_dir == "SHORT" and dex.flow <= 0) else 0.0
-            entry_score = velocity_ok * 15 + beat_reversal * 30 + distance_fit * 10 + perp_reversal * 15 + spot_confirm * 15 + whale_confirm * 10 + dex_confirm * 5
+            whale_confirm = 1.0 if (reversal_dir == "LONG" and whale_now >= whale_threshold) or (reversal_dir == "SHORT" and whale_now <= -whale_threshold) else 0.0
+            dex_confirm = 1.0 if (reversal_dir == "LONG" and dex.flow >= 0) or (reversal_dir == "SHORT" and dex.flow <= 0) else 0.0
+            perp_against = 1.0 if (reversal_dir == "LONG" and perp_obi_delta < -perp_against_threshold) or (reversal_dir == "SHORT" and perp_obi_delta > perp_against_threshold) else 0.0
+            entry_score = max(0.0, min(100.0, beat_reversal * 30 + spot_confirm * 25 + whale_confirm * 25 + distance_fit * 10 + velocity_ok * 5 + dex_confirm * 5 - perp_against * 10))
             entry_reason = (
                 f"vel={'ok' if velocity_ok else 'zayif'};"
                 f"beat={'rev' if beat_reversal else 'yok'};"
                 f"dist={'ok' if distance_fit >= 0.5 else 'uzak'};"
-                f"perp={'rev' if perp_reversal else 'yok'};"
                 f"spot={'ok' if spot_confirm else 'karsi'};"
                 f"cvd={'ok' if whale_confirm else 'karsi'};"
-                f"dex={'ok' if dex_confirm else 'karsi'}"
+                f"dex={'ok' if dex_confirm else 'karsi'};"
+                f"perp={'uyari' if perp_against else 'pasif'}"
             )
 
             # Dashboard yayini (throttle ~300ms, MAXLEN ~10).
@@ -468,6 +474,8 @@ async def run(stop: asyncio.Event) -> None:
                 "perp_obi_delta": perp_obi_delta,
                 "spot_obi_delta": spot_obi_delta,
                 "dex_flow": dex.flow,
+                "reversal_dir": reversal_dir,
+                "perp_against": perp_against,
                 "distance_fit": distance_fit,
                 "entry_score": entry_score,
                 "entry_reason": entry_reason,
@@ -525,6 +533,8 @@ async def run(stop: asyncio.Event) -> None:
                         "beat_path_sources": str(rec.get('beat_path_sources', 0)),
                         "beat_path_mode": str(rec.get('beat_path_mode', '')),
                         "dex_flow": f"{rec.get('dex_flow', 0.0):.4f}",
+                        "reversal_dir": rec.get("reversal_dir", ""),
+                        "perp_against": f"{rec.get('perp_against', 0.0):.1f}",
                         "distance_fit": f"{rec.get('distance_fit', 0.0):.4f}",
                         "entry_score": f"{rec.get('entry_score', 0.0):.1f}",
                         "entry_reason": rec.get("entry_reason", ""),

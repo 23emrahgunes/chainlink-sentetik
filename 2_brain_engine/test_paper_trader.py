@@ -60,7 +60,7 @@ class PaperPnlTest(unittest.TestCase):
             spot=120.0,
             strike=100.0,
             closed={},
-            context={"beat_path_obi": -0.30, "entry_score": 70},
+            context={"beat_path_obi": -0.30, "spot_obi": -0.10, "perp_obi_delta": 0.0, "entry_score": 70},
         )
         opened = sim.drain()
         self.assertEqual(len(opened), 1)
@@ -86,10 +86,26 @@ class PaperPnlTest(unittest.TestCase):
 
     def test_strong_obi_simulator_one_entry_per_window(self):
         sim = StrongObiSimulator(stake=1.0, obi_entry=0.25, min_entry=0.02, max_entry=0.20, min_sec_left=45, max_sec_left=90)
-        kwargs = dict(win_ts=0, now_sec=230, obi=-0.30, poly_up=0.90, spot=120.0, strike=100.0, closed={})
+        kwargs = dict(win_ts=0, now_sec=230, obi=-0.30, poly_up=0.90, spot=120.0, strike=100.0, closed={}, whale=-1.0, context={"spot_obi": -0.10, "perp_obi_delta": 0.0})
         sim.update(**kwargs)
         sim.update(**kwargs)
         self.assertEqual(len(sim.drain()), 1)
+
+    def test_strong_obi_requires_spot_and_whale_confirmation(self):
+        sim = StrongObiSimulator(stake=1.0, obi_entry=0.25, min_entry=0.02, max_entry=0.20, min_sec_left=45, max_sec_left=90)
+        base = dict(win_ts=0, now_sec=230, obi=-0.30, poly_up=0.90, spot=120.0, strike=100.0, closed={})
+        sim.update(**base, whale=-1.0, context={"spot_obi": 0.10, "perp_obi_delta": 0.0})
+        self.assertEqual(sim.drain(), [])
+        sim.update(**base, whale=1.0, context={"spot_obi": -0.10, "perp_obi_delta": 0.0})
+        self.assertEqual(sim.drain(), [])
+
+    def test_strong_obi_blocks_perp_against_warning(self):
+        sim = StrongObiSimulator(stake=1.0, obi_entry=0.25, min_entry=0.02, max_entry=0.20, min_sec_left=45, max_sec_left=90, perp_against_max=0.08)
+        sim.update(
+            win_ts=0, now_sec=230, obi=-0.30, poly_up=0.90, spot=120.0, strike=100.0,
+            closed={}, whale=-1.0, context={"spot_obi": -0.10, "perp_obi_delta": 0.20},
+        )
+        self.assertEqual(sim.drain(), [])
 
     def test_pnl_after_sequence(self):
         pnl = 0.0

@@ -107,9 +107,9 @@
   <!-- GUCLU OBI WHAT-IF -->
   <section class="card rounded-xl border border-emerald-800/40 p-5 mb-6 shadow-xl">
     <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-1">
-      Guclu OBI Girseydik <span class="text-slate-600 normal-case tracking-normal">(what-if ? gercek emir degil)</span>
+      Guclu OBI Girseydik <span class="text-slate-600 normal-case tracking-normal">(spot + CVD teyitli what-if ? gercek emir degil)</span>
     </h2>
-    <p class="text-[11px] text-slate-600 mb-4">Sadece |OBI| esigi, price-to-beat USD mesafesi ve son 45-90sn kosullariyla sanal girisleri olcer.</p>
+    <p class="text-[11px] text-slate-600 mb-4">Beat-path OBI + spot OBI + balina CVD teyidi, price-to-beat USD mesafesi ve son 45-90sn kosullariyla sanal girisleri olcer.</p>
     <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
       <div><p class="text-[11px] uppercase tracking-widest text-slate-500">Islem</p><p class="text-2xl font-bold tabular-nums text-slate-200" x-text="strongObi.trades"></p></div>
       <div><p class="text-[11px] uppercase tracking-widest text-slate-500">Isabet</p><p class="text-2xl font-bold tabular-nums" :class="strongObi.hit>=55?'text-emerald-400':strongObi.hit>0&&strongObi.hit<45?'text-rose-400':'text-slate-300'" x-text="strongObi.trades ? strongObi.hit.toFixed(1)+'%' : '?'"></p></div>
