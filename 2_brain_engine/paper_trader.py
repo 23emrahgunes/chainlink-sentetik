@@ -199,6 +199,86 @@ class StrongObiSimulator:
         return data
 
 
+class SpotObiSimulator(StrongObiSimulator):
+    """Paper-only what-if: enter once per 5m window using spot OBI direction."""
+
+    def __init__(self, stake: float = 1.0, obi_entry: float = 0.25,
+                 min_entry: float = 0.02, max_entry: float = 0.20,
+                 min_sec_left: int = 45, max_sec_left: int = 90,
+                 distance_max_usd: float = 200.0,
+                 reversal_only: bool = True) -> None:
+        super().__init__(
+            stake=stake,
+            obi_entry=obi_entry,
+            min_entry=min_entry,
+            max_entry=max_entry,
+            min_sec_left=min_sec_left,
+            max_sec_left=max_sec_left,
+            distance_max_usd=distance_max_usd,
+            spot_min=0.0,
+            whale_min=0.0,
+            perp_against_max=1.0,
+        )
+        self.reversal_only = reversal_only
+
+    def update(self, win_ts: int, now_sec: int, obi: float, poly_up: float,
+               spot: float, strike: float, closed: dict, whale: float = 0.0,
+               context: dict | None = None) -> None:
+        context = context or {}
+        self._settle_pending(closed)
+        if win_ts in self.open_windows or win_ts in self.settled_windows:
+            return
+        if poly_up is None or poly_up < 0 or spot <= 0 or strike <= 0:
+            return
+        sec_left = max(0, win_ts + WINDOW_SEC - now_sec)
+        if sec_left < self.min_sec_left or sec_left > self.max_sec_left:
+            return
+        spot_obi = float(context.get("spot_obi", obi) or 0.0)
+        if abs(spot_obi) < self.obi_entry:
+            return
+        distance = abs(spot - strike)
+        if self.distance_max_usd > 0 and distance > self.distance_max_usd:
+            return
+        if self.reversal_only:
+            if spot > strike and spot_obi >= 0:
+                return
+            if spot < strike and spot_obi <= 0:
+                return
+        direction = "LONG" if spot_obi > 0 else "SHORT"
+        price = poly_up if direction == "LONG" else 1.0 - poly_up
+        if price < self.min_entry or price > self.max_entry:
+            return
+        rec = {
+            "status": "OPEN",
+            "win": win_ts,
+            "dir": direction,
+            "outcome": "",
+            "share": "UP" if direction == "LONG" else "DOWN",
+            "result": "",
+            "market_label": "BTC Up/Down 5m",
+            "p_cex": spot,
+            "entry": price,
+            "entry_cents": price * 100.0,
+            "share_qty": share_quantity(self.stake, price),
+            "won": False,
+            "profit": 0.0,
+            "pnl_after": self.pnl,
+            "obi": spot_obi,
+            "beat_path_obi": context.get("beat_path_obi", 0.0),
+            "spot_obi": spot_obi,
+            "perp_obi_delta": context.get("perp_obi_delta", 0.0),
+            "distance_to_beat": distance,
+            "sec_left": sec_left,
+            "entry_score": context.get("entry_score", 0.0),
+            "entry_reason": "spot_obi_paper;" + str(context.get("entry_reason", "")),
+            "whale": whale,
+        }
+        self.open_windows.add(win_ts)
+        self.pending.append(rec)
+        self._to_publish.append(rec.copy())
+        log.info("[SPOT_OBI] PAPER GIRIS %s @ %.3f | spotOBI=%+.3f distance=$%.1f kalan=%ds",
+                 rec["share"], price, spot_obi, distance, sec_left)
+
 class PaperTrader:
     def __init__(self, stake: float = 1.0, obi_entry: float = 0.25,
                  value_max: float = 0.90, min_entry: float = 0.05,

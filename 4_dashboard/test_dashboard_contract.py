@@ -31,5 +31,10 @@ class DashboardTradeContractTest(unittest.TestCase):
             self.assertIn(text, self.html)
 
 
+
+    def test_spot_obi_paper_panel_contract(self):
+        for text in ("Spot OBI Paper", "spotObiPaper", "spotObiPaperList", "spot_obi", "spot_obi_trade", "pushSpotObiTrade"):
+            self.assertIn(text, self.html)
+
 if __name__ == "__main__":
     unittest.main()

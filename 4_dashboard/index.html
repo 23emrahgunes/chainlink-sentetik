@@ -136,6 +136,38 @@
     </div>
   </section>
 
+
+  <!-- SPOT OBI PAPER WHAT-IF -->
+  <section class="card rounded-xl border border-cyan-800/40 p-5 mb-6 shadow-xl">
+    <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-1">
+      Spot OBI Paper <span class="text-slate-600 normal-case tracking-normal">(sadece olcum - canli emir degil)</span>
+    </h2>
+    <p class="text-[11px] text-slate-600 mb-4">Coinbase/Kraken spot defteri price-to-beat tarafina donusu desteklediginde tek sanal giris acar; execution'a emir gondermez.</p>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
+      <div><p class="text-[11px] uppercase tracking-widest text-slate-500">Islem</p><p class="text-2xl font-bold tabular-nums text-slate-200" x-text="spotObiPaper.trades"></p></div>
+      <div><p class="text-[11px] uppercase tracking-widest text-slate-500">Isabet</p><p class="text-2xl font-bold tabular-nums" :class="spotObiPaper.hit>=55?'text-emerald-400':spotObiPaper.hit>0&&spotObiPaper.hit<45?'text-rose-400':'text-slate-300'" x-text="spotObiPaper.trades ? spotObiPaper.hit.toFixed(1)+'%' : '?'"></p></div>
+      <div><p class="text-[11px] uppercase tracking-widest text-slate-500">Net PnL</p><p class="text-2xl font-bold tabular-nums" :class="spotObiPaper.pnl>=0?'text-emerald-400':'text-rose-400'" x-text="(spotObiPaper.pnl>=0?'+':'')+'$'+spotObiPaper.pnl.toFixed(3)"></p></div>
+      <div><p class="text-[11px] uppercase tracking-widest text-slate-500">Ort. Giris</p><p class="text-2xl font-bold tabular-nums text-sky-300" x-text="spotObiPaper.avgEntry ? (spotObiPaper.avgEntry*100).toFixed(1)+'c' : '?'"></p></div>
+      <div><p class="text-[11px] uppercase tracking-widest text-slate-500">Acik</p><p class="text-2xl font-bold tabular-nums text-amber-300" x-text="spotObiPaper.open"></p></div>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm tabular-nums">
+        <thead><tr class="text-slate-500 border-b border-slate-800 text-right"><th class="py-2 text-left">Band</th><th>Islem</th><th>Kazanan</th><th>Isabet</th><th>Net</th><th>EV/Islem</th></tr></thead>
+        <tbody>
+          <template x-for="b in spotObiPaper.bands" :key="b.label">
+            <tr class="border-b border-slate-900/60 text-right">
+              <td class="py-2 text-left text-slate-300" x-text="b.label"></td>
+              <td class="text-slate-400" x-text="b.n"></td>
+              <td class="text-slate-400" x-text="b.wins"></td>
+              <td class="text-slate-300" x-text="b.n ? b.hit.toFixed(1)+'%' : '?'"></td>
+              <td class="font-semibold" :class="b.net>=0?'text-emerald-400':'text-rose-400'" x-text="b.n ? (b.net>=0?'+':'')+'$'+b.net.toFixed(2) : '?'"></td>
+              <td class="font-bold" :class="b.ev>=0?'text-emerald-400':'text-rose-400'" x-text="b.n ? (b.ev>=0?'+':'')+'$'+b.ev.toFixed(3) : '?'"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </section>
   <!-- PERP vs SPOT OBI (işlemsiz — derinlik sinyali hangi defterde daha iyi?) -->
   <section class="card rounded-xl border border-fuchsia-800/40 p-5 mb-6 shadow-xl">
     <h2 class="text-sm uppercase tracking-widest text-slate-400 mb-1">
@@ -650,6 +682,12 @@
           { label: '20c+', n: 0, wins: 0, hit: 0, net: 0, ev: 0 }
         ] },
         strongObiList: [],
+        spotObiPaper: { trades: 0, wins: 0, losses: 0, hit: 0, pnl: 0, avgEntry: 0, open: 0, bands: [
+          { label: '0-10c', n: 0, wins: 0, hit: 0, net: 0, ev: 0 },
+          { label: '10-20c', n: 0, wins: 0, hit: 0, net: 0, ev: 0 },
+          { label: '20c+', n: 0, wins: 0, hit: 0, net: 0, ev: 0 }
+        ] },
+        spotObiPaperList: [],
         page: 1, pageSize: 20, // sayfalama (20/sayfa)
         obiHit: 0, obiN: 0, strongHit: 0, strongN: 0, contraHit: 0, contraN: 0, // OBI olcum
         perpHit: 0, spotHit: 0, mixHit: 0, whaleHit: 0, cmpN: 0, // perp/spot/balina OBI kiyas
@@ -859,6 +897,23 @@
             return;
           }
 
+          if (msg.type === 'spot_obi') {
+            this.spotObiPaper = {
+              trades: Number(d.trades || 0), wins: Number(d.wins || 0), losses: Number(d.losses || 0),
+              hit: Number(d.hit || 0), pnl: Number(d.pnl || 0), avgEntry: Number(d.avg_entry || 0), open: Number(d.open || 0),
+              bands: [0, 1, 2].map(i => ({
+                label: d[`band${i}_label`] || ['0-10c','10-20c','20c+'][i],
+                n: Number(d[`band${i}_n`] || 0), wins: Number(d[`band${i}_wins`] || 0),
+                hit: Number(d[`band${i}_hit`] || 0), net: Number(d[`band${i}_net`] || 0), ev: Number(d[`band${i}_ev`] || 0)
+              }))
+            };
+            return;
+          }
+
+          if (msg.type === 'spot_obi_trade') {
+            this.pushSpotObiTrade(d);
+            return;
+          }
           if (msg.type === 'trade') {             // islem gecmisi satiri
             const win = Number(d.win);
             const label = this.formatMarketWindowET(win);
@@ -985,6 +1040,23 @@
           });
           if (this.strongObiList.length > 500) this.strongObiList.pop();
         },
+        pushSpotObiTrade(d) {
+          const win = Number(d.win || 0);
+          const id = d._stream_id || ['spot', win, d.status || ''].join('-');
+          if (this.spotObiPaperList.some(e => e.id === id)) return;
+          this.spotObiPaperList.unshift({
+            id, win,
+            share: d.share || (d.dir === 'LONG' ? 'UP' : 'DOWN'),
+            result: d.result || (d.outcome ? (d.outcome === 'LONG' ? 'UP' : 'DOWN') : ''),
+            entry: Number(d.entry || 0),
+            won: d.won === '1',
+            profit: Number(d.profit || 0),
+            obi: Number(d.obi || d.spot_obi || 0),
+            distance: Number(d.distance_to_beat || 0),
+            secLeft: Number(d.sec_left || 0)
+          });
+          if (this.spotObiPaperList.length > 500) this.spotObiPaperList.pop();
+        },
         pushRow(d, status) {
           this.totalSignals++;
           this.signals.unshift({
@@ -1031,4 +1103,3 @@
     }
   </script>
 </body>
-

@@ -160,6 +160,8 @@ STREAMS = {
     "stream:pnl": "pnl",
     "stream:strong_obi": "strong_obi",
     "stream:strong_obi_trades": "strong_obi_trade",
+    "stream:spot_obi": "spot_obi",
+    "stream:spot_obi_trades": "spot_obi_trade",
     "stream:measure": "measure",
     "stream:straddle": "straddle",
     "stream:obicmp": "obicmp",
@@ -329,6 +331,12 @@ async def ws_endpoint(ws: WebSocket) -> None:
         strong_snap = await client.xrevrange("stream:strong_obi", count=1)
         for _id, fields in strong_snap:
             await ws.send_json({"type": "strong_obi", "id": _id, "data": {**fields, "_stream_id": _id}})
+        spot_rows = await client.xrange("stream:spot_obi_trades", count=500)
+        for _id, fields in spot_rows:
+            await ws.send_json({"type": "spot_obi_trade", "id": _id, "data": {**fields, "_stream_id": _id}})
+        spot_snap = await client.xrevrange("stream:spot_obi", count=1)
+        for _id, fields in spot_snap:
+            await ws.send_json({"type": "spot_obi", "id": _id, "data": {**fields, "_stream_id": _id}})
         erows = await client.xrevrange("stream:executions", count=80)
         for _id, fields in reversed(erows):
             await ws.send_json({"type": "execution", "id": _id, "data": {**fields, "_stream_id": _id}})

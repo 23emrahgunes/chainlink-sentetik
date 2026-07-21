@@ -1,6 +1,6 @@
 import unittest
 
-from paper_trader import PaperTrader, StrongObiSimulator, payout_profit, share_quantity
+from paper_trader import PaperTrader, StrongObiSimulator, SpotObiSimulator, payout_profit, share_quantity
 
 
 class PaperPnlTest(unittest.TestCase):
@@ -107,6 +107,39 @@ class PaperPnlTest(unittest.TestCase):
         )
         self.assertEqual(sim.drain(), [])
 
+    def test_spot_obi_simulator_tracks_paper_pnl(self):
+        sim = SpotObiSimulator(stake=1.0, obi_entry=0.25, min_entry=0.02, max_entry=0.20, min_sec_left=45, max_sec_left=90)
+        sim.update(
+            win_ts=0,
+            now_sec=230,
+            obi=-0.10,
+            poly_up=0.90,
+            spot=120.0,
+            strike=100.0,
+            closed={},
+            context={"spot_obi": -0.35, "beat_path_obi": -0.20, "entry_score": 60},
+        )
+        opened = sim.drain()
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(opened[0]["share"], "DOWN")
+        self.assertAlmostEqual(opened[0]["entry"], 0.10)
+        sim.update(win_ts=300, now_sec=530, obi=0.0, poly_up=0.50, spot=90.0, strike=100.0, closed={300: (120.0, 90.0)})
+        settled = sim.drain()
+        self.assertEqual(settled[-1]["status"], "SETTLED")
+        self.assertTrue(settled[-1]["won"])
+        self.assertEqual(sim.snapshot()["wins"], "1")
+
+    def test_spot_obi_simulator_one_entry_per_window(self):
+        sim = SpotObiSimulator(stake=1.0, obi_entry=0.25, min_entry=0.02, max_entry=0.20, min_sec_left=45, max_sec_left=90)
+        kwargs = dict(win_ts=0, now_sec=230, obi=0.0, poly_up=0.90, spot=120.0, strike=100.0, closed={}, context={"spot_obi": -0.35})
+        sim.update(**kwargs)
+        sim.update(**kwargs)
+        self.assertEqual(len(sim.drain()), 1)
+
+    def test_spot_obi_reversal_only_blocks_same_side(self):
+        sim = SpotObiSimulator(stake=1.0, obi_entry=0.25, min_entry=0.02, max_entry=0.20, min_sec_left=45, max_sec_left=90)
+        sim.update(win_ts=0, now_sec=230, obi=0.0, poly_up=0.10, spot=120.0, strike=100.0, closed={}, context={"spot_obi": 0.35})
+        self.assertEqual(sim.drain(), [])
     def test_pnl_after_sequence(self):
         pnl = 0.0
         pnl += payout_profit(1.0, 0.025, True)

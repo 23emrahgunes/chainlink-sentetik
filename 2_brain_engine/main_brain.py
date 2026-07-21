@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 from chainlink_feed import ChainlinkFeed
 from dex_feed import DexFeed
 from obi_matrix import compute_obi
-from paper_trader import PaperTrader, StrongObiSimulator
+from paper_trader import PaperTrader, StrongObiSimulator, SpotObiSimulator
 from polymarket_feed import PolyFeed
 from pricetobeat_feed import PriceToBeatFeed
 from signal_meter import SignalMeter
@@ -246,6 +246,15 @@ async def run(stop: asyncio.Event) -> None:
         spot_min=float(os.getenv("STRONG_OBI_SPOT_MIN", "0.0")),
         whale_min=float(os.getenv("STRONG_OBI_WHALE_MIN", "0.0")),
         perp_against_max=float(os.getenv("STRONG_OBI_PERP_AGAINST_MAX", "0.08")))
+    spot_obi_sim = SpotObiSimulator(
+        stake=float(os.getenv("PAPER_STAKE", "1.0")),
+        obi_entry=float(os.getenv("SPOT_OBI_PAPER_ENTRY", os.getenv("OBI_ENTRY", "0.25"))),
+        min_entry=float(os.getenv("SPOT_OBI_PAPER_MIN_ENTRY", os.getenv("OBI_MIN_ENTRY", "0.02"))),
+        max_entry=float(os.getenv("SPOT_OBI_PAPER_MAX_ENTRY", "0.20")),
+        min_sec_left=int(os.getenv("SPOT_OBI_PAPER_MIN_SEC_LEFT", "45")),
+        max_sec_left=int(os.getenv("SPOT_OBI_PAPER_MAX_SEC_LEFT", "90")),
+        distance_max_usd=float(os.getenv("SPOT_OBI_PAPER_DISTANCE_MAX_USD", os.getenv("MAX_DISTANCE_TO_BEAT_USD", "200"))),
+        reversal_only=os.getenv("SPOT_OBI_PAPER_REVERSAL_ONLY", "1").strip().lower() not in {"0", "false", "no", "off"})
     # OBI diverjans/isabet olcumu (islemsiz) Ã¢â‚¬â€ edge var mi ampirik.
     meter = SignalMeter(sample_at_sec=int(os.getenv("SIGNAL_SAMPLE_SEC", "90")),
                         strong=obi_entry)
@@ -484,6 +493,8 @@ async def run(stop: asyncio.Event) -> None:
                           p2b.closed, whale=whale_now, context=entry_context)
             strong_sim.update(win_ts, now_sec, trade_obi, poly_up_win, spot_ref, strike,
                               p2b.closed, whale=whale_now, context=entry_context)
+            spot_obi_sim.update(win_ts, now_sec, obi_spot_ema, poly_up_win, spot_ref, strike,
+                                p2b.closed, whale=whale_now, context=entry_context)
             meter.update(win_ts, now_sec, obi_ema, poly_up_win, p2b.closed)
             obicmp.update(win_ts, now_sec, obi_perp_ema, obi_spot_ema, obi_ema,
                           whale_now, p2b.closed)
@@ -568,13 +579,42 @@ async def run(stop: asyncio.Event) -> None:
                     }, maxlen=500, approximate=True)
                 except Exception as exc:
                     log.error("[STRONG_OBI] xadd hatasi: %s", exc)
-
+            for rec in spot_obi_sim.drain():
+                try:
+                    await consumer.client.xadd("stream:spot_obi_trades", {
+                        "status": rec.get("status", "SETTLED"),
+                        "win": str(rec["win"]),
+                        "dir": rec["dir"],
+                        "outcome": rec.get("outcome", ""),
+                        "share": rec.get("share", "UP" if rec["dir"] == "LONG" else "DOWN"),
+                        "result": rec.get("result", ""),
+                        "market_label": rec.get("market_label", "BTC Up/Down 5m"),
+                        "p_cex": f"{rec.get('p_cex', 0.0):.4f}",
+                        "entry": f"{rec['entry']:.4f}",
+                        "entry_cents": f"{rec.get('entry_cents', rec['entry'] * 100):.2f}",
+                        "share_qty": f"{rec.get('share_qty', 0.0):.6f}",
+                        "won": "1" if rec.get("won") else "0",
+                        "profit": f"{rec.get('profit', 0.0):.4f}",
+                        "pnl_after": f"{rec.get('pnl_after', 0.0):.4f}",
+                        "obi": f"{rec.get('obi', 0.0):.4f}",
+                        "spot_obi": f"{rec.get('spot_obi', 0.0):.4f}",
+                        "beat_path_obi": f"{rec.get('beat_path_obi', 0.0):.4f}",
+                        "distance_to_beat": f"{rec.get('distance_to_beat', 0.0):.2f}",
+                        "sec_left": str(rec.get('sec_left', -1)),
+                        "entry_score": f"{rec.get('entry_score', 0.0):.1f}",
+                        "entry_reason": rec.get("entry_reason", ""),
+                        "whale": f"{rec.get('whale', 0.0):.3f}",
+                    }, maxlen=500, approximate=True)
+                except Exception as exc:
+                    log.error("[SPOT_OBI] xadd hatasi: %s", exc)
             if now_ms - last_pnl_pub >= 1000:
                 last_pnl_pub = now_ms
                 try:
                     await consumer.client.xadd("stream:pnl", trader.snapshot(),
                                                maxlen=10, approximate=True)
                     await consumer.client.xadd("stream:strong_obi", strong_sim.snapshot(),
+                                               maxlen=10, approximate=True)
+                    await consumer.client.xadd("stream:spot_obi", spot_obi_sim.snapshot(),
                                                maxlen=10, approximate=True)
                     await consumer.client.xadd("stream:measure", meter.snapshot(),
                                                maxlen=10, approximate=True)
@@ -626,10 +666,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
