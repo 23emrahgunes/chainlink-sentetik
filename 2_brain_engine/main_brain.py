@@ -11,6 +11,7 @@ KISIT: Agir matematik yalnizca NumPy. Ara array'ler dongu-yerel kalir (GC).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -96,10 +97,65 @@ def _depth(field: dict, base: str, fallback: str) -> float:
     return _f(field, fallback)
 
 
+
+def _book_levels(raw: str, rate: float = 1.0) -> list[tuple[float, float]]:
+    try:
+        data = json.loads(raw or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    out = []
+    for lv in data:
+        if not isinstance(lv, list) or len(lv) < 2:
+            continue
+        try:
+            price = float(lv[0]) * rate
+            size = float(lv[1])
+        except (TypeError, ValueError):
+            continue
+        if price > 0 and size > 0:
+            out.append((price, size))
+    return out
+
+
+def _sum_between(levels: list[tuple[float, float]], low: float, high: float) -> float:
+    if high < low:
+        low, high = high, low
+    return sum(size for price, size in levels if low <= price <= high)
+
+
+def _beat_path_metrics(quotes: dict, spot: float, strike: float, now_ms: float, ttl: float,
+                       pad_usd: float = 25.0) -> dict:
+    """Price-to-beat path CEX liquidity. OBI positive=UP support, negative=DOWN pressure."""
+    if spot <= 0 or strike <= 0 or spot == strike:
+        return {"obi": 0.0, "bid": 0.0, "ask": 0.0, "n": 0, "mode": "flat"}
+    bid_total = 0.0
+    ask_total = 0.0
+    n = 0
+    above = spot > strike
+    for q in quotes.values():
+        if now_ms - q["ts"] > ttl:
+            continue
+        bids = q.get("bids") or []
+        asks = q.get("asks") or []
+        if not bids or not asks:
+            continue
+        n += 1
+        if above:
+            # DOWN reversal: spot->beat yolundaki bid desteği düşüşü tutar; spot üstü ask baskısı düşüşü iter.
+            bid_total += _sum_between(bids, strike, spot)
+            ask_total += _sum_between(asks, spot, spot + pad_usd)
+        else:
+            # UP reversal: spot->beat yolundaki ask duvarı yükselişi tutar; spot altı bid desteği yükselişi iter.
+            bid_total += _sum_between(bids, spot - pad_usd, spot)
+            ask_total += _sum_between(asks, spot, strike)
+    total = bid_total + ask_total
+    obi = ((bid_total - ask_total) / total) if total > 0 else 0.0
+    return {"obi": max(-1.0, min(1.0, obi)), "bid": bid_total, "ask": ask_total,
+            "n": n, "mode": "above" if above else "below"}
 def _ema_delta(prev: float, cur: float) -> float:
     return cur - prev
 def _group_obi(quotes: dict, srcs: set, now_ms: float, ttl: float) -> float:
-    """Belirli borsa grubunun (perp/spot) derinlik OBI'si â€” olcum icin (NumPy C-level)."""
+    """Belirli borsa grubunun (perp/spot) derinlik OBI'si Ã¢â‚¬â€ olcum icin (NumPy C-level)."""
     bv, av = [], []
     for s, q in quotes.items():
         if s in srcs and now_ms - q["ts"] <= ttl:
@@ -121,11 +177,12 @@ async def run(stop: asyncio.Event) -> None:
     quote_ttl_ms = float(os.getenv("QUOTE_TTL_MS", "4000"))  # borsa "taze" sayilma penceresi
     obi_alpha = float(os.getenv("OBI_EMA_ALPHA", "0.2"))     # OBI yumusatma (0..1)
     obi_entry = float(os.getenv("OBI_ENTRY", "0.25"))        # |OBI| bu esigi asinca tahmin
+    beat_path_pad_usd = float(os.getenv("BEAT_PATH_PAD_USD", "25"))
     # USD-spot borsalar: Chainlink/Polymarket referansina en yakin (perp primi yok).
     spot_sources = _csv_set(os.getenv("SPOT_SOURCES", "coinbase,kraken"))
     # USDT-quote borsalar: fiyatlari USDT/USD kuruyla USD'ye cevrilir.
     usdt_sources = _csv_set(os.getenv("USDT_SOURCES", "binance,bybit,okx,okx_swap"))
-    # OBI kiyas gruplari (olcum): perp defter vs spot defter â€” hangisi daha iyi tahmin?
+    # OBI kiyas gruplari (olcum): perp defter vs spot defter Ã¢â‚¬â€ hangisi daha iyi tahmin?
     perp_obi_srcs = _csv_set(os.getenv("PERP_OBI_SOURCES", "binance,bybit,okx_swap"))
     spot_obi_srcs = _csv_set(os.getenv("SPOT_OBI_SOURCES", "coinbase,kraken"))
 
@@ -157,12 +214,12 @@ async def run(stop: asyncio.Event) -> None:
                       window_sec=int(os.getenv("WHALE_WINDOW_SEC", "30")),
                       whale_min_btc=float(os.getenv("WHALE_MIN_BTC", "5.0")))
     whale_task = asyncio.ensure_future(whale.run(stop))
-    # DEX akisi (Uniswap V3 WBTC, GeckoTerminal) â€” alim/satim baskisi + likidite.
+    # DEX akisi (Uniswap V3 WBTC, GeckoTerminal) Ã¢â‚¬â€ alim/satim baskisi + likidite.
     dex = DexFeed(network=os.getenv("DEX_NETWORK", "arbitrum"),
                   pool=os.getenv("DEX_POOL", "0x0e4831319a50228b9e450861297ab92dee15b44f"),
                   timeframe=os.getenv("DEX_TIMEFRAME", "m15"))
     dex_task = asyncio.ensure_future(dex.run(stop))
-    # Kagit-ustu trader (DRY_RUN, $1): OBI-suruculu â€” derinlik baskisini sezip
+    # Kagit-ustu trader (DRY_RUN, $1): OBI-suruculu Ã¢â‚¬â€ derinlik baskisini sezip
     # fiyat kirilmadan once yon tahmini.
     _strategy = os.getenv("PAPER_STRATEGY", "dip")  # "dip" (ucuz taraf) | "obi"
     _lock_at = int(os.getenv("DIP_LOCK_AT_SEC", "270")) if _strategy == "dip" \
@@ -178,12 +235,12 @@ async def run(stop: asyncio.Event) -> None:
         reversal_window_sec=int(os.getenv("REVERSAL_WINDOW_SEC", "60")),
         distance_max_usd=float(os.getenv("MAX_DISTANCE_TO_BEAT_USD", os.getenv("REVERSAL_DISTANCE_MAX_USD", "80"))),
         margin_max=float(os.getenv("REVERSAL_MARGIN_MAX", "0.0012")))
-    # OBI diverjans/isabet olcumu (islemsiz) â€” edge var mi ampirik.
+    # OBI diverjans/isabet olcumu (islemsiz) Ã¢â‚¬â€ edge var mi ampirik.
     meter = SignalMeter(sample_at_sec=int(os.getenv("SIGNAL_SAMPLE_SEC", "90")),
                         strong=obi_entry)
-    # Perp vs Spot OBI kiyas olcumu (islemsiz) â€” derinlik sinyali hangi defterde daha iyi?
+    # Perp vs Spot OBI kiyas olcumu (islemsiz) Ã¢â‚¬â€ derinlik sinyali hangi defterde daha iyi?
     obicmp = ObiCompareMeter(sample_at_sec=int(os.getenv("SIGNAL_SAMPLE_SEC", "90")))
-    # STRADDLE olcumu (islemsiz) â€” cift-limit UP@.25/DOWN@.25 kararsiz bolgede +EV mi?
+    # STRADDLE olcumu (islemsiz) Ã¢â‚¬â€ cift-limit UP@.25/DOWN@.25 kararsiz bolgede +EV mi?
     _buckets = tuple(float(x) for x in
                      os.getenv("STRADDLE_MAKAS_BUCKETS", "5,10,20,40").split(","))
     straddle = StraddleMeter(
@@ -233,9 +290,12 @@ async def run(stop: asyncio.Event) -> None:
             bid_p, bid_q = _f(field, "bid_p"), _f(field, "bid_q")
             ask_p, ask_q = _f(field, "ask_p"), _f(field, "ask_q")
             # Tether piyasalarini (Binance/Bybit/OKX) USDT/USD kuruyla USD'ye cevir.
+            level_rate = usdt.rate if src in usdt_sources else 1.0
             if src in usdt_sources:
                 bid_p *= usdt.rate
                 ask_p *= usdt.rate
+            bids_book = _book_levels(field.get("book_bids", ""), level_rate)
+            asks_book = _book_levels(field.get("book_asks", ""), level_rate)
             # derinlik hacmi (tum seviyeler); yoksa top seviyeye dus
             bid_vol = _depth(field, "bid_vol", "bid_q") or bid_q
             ask_vol = _depth(field, "ask_vol", "ask_q") or ask_q
@@ -243,8 +303,8 @@ async def run(stop: asyncio.Event) -> None:
             quotes[src] = {"bid_p": bid_p, "bid_q": bid_q,
                            "ask_p": ask_p, "ask_q": ask_q,
                            "bid_vol": bid_vol, "ask_vol": ask_vol,
+                           "bids": bids_book, "asks": asks_book,
                            "market_type": field.get("market_type", ""), "ts": now_ms}
-
             # --- SENTETIK KURESEL FIYAT: 5 borsanin TAZE kotasyonlari (hacim-agirlikli) ---
             # Diziler <=10 elemanlik veri toplamadir; asil hesap (VWAP) NumPy C-level.
             fresh = [q for s, q in quotes.items() if now_ms - q["ts"] <= quote_ttl_ms]
@@ -258,7 +318,7 @@ async def run(stop: asyncio.Event) -> None:
             bid_vols = np.array([q["bid_vol"] for q in fresh], dtype=np.float64)
             ask_vols = np.array([q["ask_vol"] for q in fresh], dtype=np.float64)
             obi = compute_obi(bid_vols, ask_vols)
-            obi_ema = obi_alpha * obi + (1.0 - obi_alpha) * obi_ema  # yumusatma (gurultu â†“)
+            obi_ema = obi_alpha * obi + (1.0 - obi_alpha) * obi_ema  # yumusatma (gurultu Ã¢â€ â€œ)
 
             # --- PERP vs SPOT OBI (olcum; trader'in obi_ema'sini ETKILEMEZ) ---
             obi_perp = _group_obi(quotes, perp_obi_srcs, now_ms, quote_ttl_ms)
@@ -310,6 +370,9 @@ async def run(stop: asyncio.Event) -> None:
             sec_left = max(0, int((win + 1) * window_sec - now_ms // 1000))
             distance_to_beat = abs(spot_ref - strike) if strike > 0 else 0.0
             required_velocity = distance_to_beat / max(sec_left, 1)
+            beat_path = _beat_path_metrics(quotes, spot_ref, strike, now_ms, quote_ttl_ms, beat_path_pad_usd)
+            beat_path_obi = beat_path["obi"]
+            trade_obi = beat_path_obi if beat_path["n"] > 0 else obi_ema
 
             # Polymarket Up olasiligi (taze degilse -1 = veri yok)
             poly_up, poly_fresh = poly.snapshot(max_stale_ms=3000)
@@ -317,14 +380,16 @@ async def run(stop: asyncio.Event) -> None:
                 poly_up = -1.0
             cheap_side_price = min(poly_up, 1.0 - poly_up) if poly_up >= 0 else -1.0
             velocity_ok = 1.0 if realized_velocity >= required_velocity else 0.0
+            beat_reversal = 1.0 if (spot_ref < strike and beat_path_obi > 0) or (spot_ref > strike and beat_path_obi < 0) else 0.0
             perp_reversal = 1.0 if (cand_dir == "LONG" and perp_obi_delta > 0) or (cand_dir == "SHORT" and perp_obi_delta < 0) else 0.0
             spot_confirm = 1.0 if (cand_dir == "LONG" and obi_spot_ema >= -0.05) or (cand_dir == "SHORT" and obi_spot_ema <= 0.05) else 0.0
             whale_now = whale.signal(now_ms)
             whale_confirm = 1.0 if (cand_dir == "LONG" and whale_now >= 0) or (cand_dir == "SHORT" and whale_now <= 0) else 0.0
             dex_confirm = 1.0 if (cand_dir == "LONG" and dex.flow >= 0) or (cand_dir == "SHORT" and dex.flow <= 0) else 0.0
-            entry_score = velocity_ok * 25 + perp_reversal * 30 + spot_confirm * 20 + whale_confirm * 15 + dex_confirm * 10
+            entry_score = velocity_ok * 20 + beat_reversal * 30 + perp_reversal * 20 + spot_confirm * 15 + whale_confirm * 10 + dex_confirm * 5
             entry_reason = (
                 f"vel={'ok' if velocity_ok else 'zayif'};"
+                f"beat={'rev' if beat_reversal else 'yok'};"
                 f"perp={'rev' if perp_reversal else 'yok'};"
                 f"spot={'ok' if spot_confirm else 'karsi'};"
                 f"cvd={'ok' if whale_confirm else 'karsi'};"
@@ -345,6 +410,11 @@ async def run(stop: asyncio.Event) -> None:
                              "required_velocity": f"{required_velocity:.4f}",
                              "realized_velocity": f"{realized_velocity:.4f}",
                              "cheap_side_price": f"{cheap_side_price:.4f}",
+                             "beat_path_obi": f"{beat_path_obi:.4f}",
+                             "beat_path_bid": f"{beat_path['bid']:.4f}",
+                             "beat_path_ask": f"{beat_path['ask']:.4f}",
+                             "beat_path_sources": str(beat_path["n"]),
+                             "beat_path_mode": beat_path["mode"],
                              "entry_score": f"{entry_score:.1f}", "entry_reason": entry_reason,
                              "usdt": f"{usdt.rate:.5f}",
                              "chainlink": f"{chainlink.price:.2f}",
@@ -375,6 +445,11 @@ async def run(stop: asyncio.Event) -> None:
                 "required_velocity": required_velocity,
                 "realized_velocity": realized_velocity,
                 "cheap_side_price": cheap_side_price,
+                "beat_path_obi": beat_path_obi,
+                "beat_path_bid": beat_path["bid"],
+                "beat_path_ask": beat_path["ask"],
+                "beat_path_sources": beat_path["n"],
+                "beat_path_mode": beat_path["mode"],
                 "perp_obi": obi_perp_ema,
                 "spot_obi": obi_spot_ema,
                 "perp_obi_delta": perp_obi_delta,
@@ -383,7 +458,7 @@ async def run(stop: asyncio.Event) -> None:
                 "entry_score": entry_score,
                 "entry_reason": entry_reason,
             }
-            trader.update(win_ts, now_sec, obi_ema, poly_up_win, spot_ref, strike,
+            trader.update(win_ts, now_sec, trade_obi, poly_up_win, spot_ref, strike,
                           p2b.closed, whale=whale_now, context=entry_context)
             meter.update(win_ts, now_sec, obi_ema, poly_up_win, p2b.closed)
             obicmp.update(win_ts, now_sec, obi_perp_ema, obi_spot_ema, obi_ema,
@@ -428,6 +503,11 @@ async def run(stop: asyncio.Event) -> None:
                         "spot_obi": f"{rec.get('spot_obi', 0.0):.4f}",
                         "perp_obi_delta": f"{rec.get('perp_obi_delta', 0.0):.4f}",
                         "spot_obi_delta": f"{rec.get('spot_obi_delta', 0.0):.4f}",
+                        "beat_path_obi": f"{rec.get('beat_path_obi', 0.0):.4f}",
+                        "beat_path_bid": f"{rec.get('beat_path_bid', 0.0):.4f}",
+                        "beat_path_ask": f"{rec.get('beat_path_ask', 0.0):.4f}",
+                        "beat_path_sources": str(rec.get('beat_path_sources', 0)),
+                        "beat_path_mode": str(rec.get('beat_path_mode', '')),
                         "dex_flow": f"{rec.get('dex_flow', 0.0):.4f}",
                         "entry_score": f"{rec.get('entry_score', 0.0):.1f}",
                         "entry_reason": rec.get("entry_reason", ""),
@@ -481,7 +561,7 @@ def main() -> None:
     try:
         loop.run_until_complete(run(stop))
     except KeyboardInterrupt:
-        log.info("[BRAIN] KeyboardInterrupt â€” kapaniyor.")
+        log.info("[BRAIN] KeyboardInterrupt Ã¢â‚¬â€ kapaniyor.")
     finally:
         loop.close()
         sys.exit(0)
@@ -489,3 +569,10 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+
+

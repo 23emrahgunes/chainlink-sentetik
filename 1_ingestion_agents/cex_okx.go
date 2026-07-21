@@ -60,6 +60,7 @@ func okxAdapter(url, src, inst, marketType string) CEXAdapter {
 				BidVol5: b5, AskVol5: a5,
 				BidVolUSD10: bu10, AskVolUSD10: au10, BidVolUSD25: bu25, AskVolUSD25: au25,
 				BidVolUSD50: bu50, AskVolUSD50: au50, BidVolUSD100: bu100, AskVolUSD100: au100,
+				Bids: d.Bids, Asks: d.Asks,
 			}, true
 		},
 	}

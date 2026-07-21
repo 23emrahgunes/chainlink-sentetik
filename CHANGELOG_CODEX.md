@@ -1,5 +1,13 @@
 # CHANGELOG_CODEX
 
+## 2026-07-17 - Price-to-beat path depth signal
+
+- CEX ingestion now publishes compact `book_bids` and `book_asks` snapshots alongside legacy depth totals.
+- Brain now computes `beat_path_obi` directly on the USD path between current spot and Polymarket price-to-beat.
+- If BTC is above price-to-beat, bids between price-to-beat and spot are treated as downside support, while asks above spot are downside pressure.
+- If BTC is below price-to-beat, asks between spot and price-to-beat are treated as upside resistance, while bids below spot are upside support.
+- Paper/live entry uses `beat_path_obi` when book levels are available and falls back to legacy aggregate OBI otherwise.
+- New telemetry fields: `beat_path_obi`, `beat_path_bid`, `beat_path_ask`, `beat_path_sources`, and `beat_path_mode`.
 ## 2026-07-17 - USD price-to-beat distance filter
 
 - Reversal paper/live entry now uses `MAX_DISTANCE_TO_BEAT_USD` as the primary distance filter instead of percent margin.
@@ -74,3 +82,4 @@
 - Added `3_execution_agent/env_alias.py` so older working `PM_EDGE_*` configuration names map to the current execution/CLOB settings.
 - Supported aliases include private key, CLOB API credentials, CLOB host, chain id, notional size, max live notional, timeout, and signature type.
 - Updated deploy live env example and tests for old-to-new env compatibility.
+

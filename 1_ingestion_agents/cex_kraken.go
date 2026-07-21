@@ -59,6 +59,7 @@ func KrakenAdapter(url string) CEXAdapter {
 				BidVol5: b5, AskVol5: a5, BidVol20: b20, AskVol20: a20, BidVol50: b50, AskVol50: a50,
 				BidVolUSD10: bu10, AskVolUSD10: au10, BidVolUSD25: bu25, AskVolUSD25: au25,
 				BidVolUSD50: bu50, AskVolUSD50: au50, BidVolUSD100: bu100, AskVolUSD100: au100,
+				Bids: topBids, Asks: topAsks,
 			}, true
 		},
 	}

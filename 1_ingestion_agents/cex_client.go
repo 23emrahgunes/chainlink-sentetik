@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"strconv"
 	"sync"
@@ -25,6 +26,17 @@ func sumLevels(levels [][]string) string {
 		}
 	}
 	return strconv.FormatFloat(total, 'f', -1, 64)
+}
+
+func levelsJSON(levels [][]string, limit int) string {
+	if limit > 0 && len(levels) > limit {
+		levels = levels[:limit]
+	}
+	data, err := json.Marshal(levels)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // TopOfBook: en iyi bid/ask + DERINLIK toplam hacmi (OBI icin).
@@ -51,6 +63,8 @@ type TopOfBook struct {
 	AskVolUSD50  string
 	BidVolUSD100 string
 	AskVolUSD100 string
+	Bids         [][]string
+	Asks         [][]string
 }
 
 // CEXAdapter: bir borsanin WSS baglanti tanimi.
@@ -196,6 +210,12 @@ func connectCEX(ctx context.Context, pub *MemoryPub, a CEXAdapter) error {
 		if tob.BidVolUSD100 != "" {
 			values["bid_vol_usd_100"] = tob.BidVolUSD100
 			values["ask_vol_usd_100"] = tob.AskVolUSD100
+		}
+		if len(tob.Bids) > 0 {
+			values["book_bids"] = levelsJSON(tob.Bids, 50)
+		}
+		if len(tob.Asks) > 0 {
+			values["book_asks"] = levelsJSON(tob.Asks, 50)
 		}
 		if perr := pub.Publish(pctx, StreamCEX, values); perr != nil && ctx.Err() == nil {
 			log.Printf("[%s] publish hatasi: %v", a.Name, perr)
