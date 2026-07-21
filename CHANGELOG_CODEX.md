@@ -1,5 +1,13 @@
 # CHANGELOG_CODEX
 
+## 2026-07-17 - USD-distance CEX depth bands
+
+- CEX ingestion now publishes price-distance depth bands in addition to the old level-count fields.
+- New Redis fields: `bid_vol_usd_10`, `ask_vol_usd_10`, `bid_vol_usd_25`, `ask_vol_usd_25`, `bid_vol_usd_50`, `ask_vol_usd_50`, `bid_vol_usd_100`, `ask_vol_usd_100`.
+- These fields are BTC size totals inside dollar price-distance bands from the current best bid/ask. Example: `bid_vol_usd_100` means total bid BTC from best bid down to best bid - $100.
+- Brain OBI now prefers USD-distance bands in this order: 100, 50, 25, 10; then falls back to old 50/20/5 level-count fields and legacy `bid_vol`/`ask_vol`.
+- Added Go tests proving the USD-distance band math is not level-count based.
+
 ## 2026-07-17 - Live entry alignment and limit diagnostics
 
 - Live execution now listens to `stream:entries` by default, which is produced only when the paper reversal trader opens an `OPEN` setup. Set `EXECUTION_STREAM=stream:signals` only if the older generic momentum trigger is intentionally needed.

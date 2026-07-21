@@ -86,8 +86,8 @@ def _csv_set(value: str) -> set:
 
 
 def _depth(field: dict, base: str, fallback: str) -> float:
-    """Prefer the deepest normalized book field, then fall back to legacy volume."""
-    for suffix in ("_50", "_20", "_5", ""):
+    """Prefer USD-distance depth bands, then level-count fields, then legacy volume."""
+    for suffix in ("_usd_100", "_usd_50", "_usd_25", "_usd_10", "_50", "_20", "_5", ""):
         key = base + suffix
         if key in field:
             v = _f(field, key)

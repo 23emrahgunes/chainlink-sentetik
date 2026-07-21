@@ -29,20 +29,28 @@ func sumLevels(levels [][]string) string {
 
 // TopOfBook: en iyi bid/ask + DERINLIK toplam hacmi (OBI icin).
 type TopOfBook struct {
-	Src        string
-	MarketType string // perp | spot
-	BidP       string
-	BidQ       string
-	AskP       string
-	AskQ       string
-	BidVol     string // tum bid seviyelerinin toplam hacmi (derinlik)
-	AskVol     string // tum ask seviyelerinin toplam hacmi (derinlik)
-	BidVol5    string
-	AskVol5    string
-	BidVol20   string
-	AskVol20   string
-	BidVol50   string
-	AskVol50   string
+	Src          string
+	MarketType   string // perp | spot
+	BidP         string
+	BidQ         string
+	AskP         string
+	AskQ         string
+	BidVol       string // tum bid seviyelerinin toplam hacmi (derinlik)
+	AskVol       string // tum ask seviyelerinin toplam hacmi (derinlik)
+	BidVol5      string
+	AskVol5      string
+	BidVol20     string
+	AskVol20     string
+	BidVol50     string
+	AskVol50     string
+	BidVolUSD10  string
+	AskVolUSD10  string
+	BidVolUSD25  string
+	AskVolUSD25  string
+	BidVolUSD50  string
+	AskVolUSD50  string
+	BidVolUSD100 string
+	AskVolUSD100 string
 }
 
 // CEXAdapter: bir borsanin WSS baglanti tanimi.
@@ -172,6 +180,22 @@ func connectCEX(ctx context.Context, pub *MemoryPub, a CEXAdapter) error {
 		if tob.BidVol50 != "" {
 			values["bid_vol_50"] = tob.BidVol50
 			values["ask_vol_50"] = tob.AskVol50
+		}
+		if tob.BidVolUSD10 != "" {
+			values["bid_vol_usd_10"] = tob.BidVolUSD10
+			values["ask_vol_usd_10"] = tob.AskVolUSD10
+		}
+		if tob.BidVolUSD25 != "" {
+			values["bid_vol_usd_25"] = tob.BidVolUSD25
+			values["ask_vol_usd_25"] = tob.AskVolUSD25
+		}
+		if tob.BidVolUSD50 != "" {
+			values["bid_vol_usd_50"] = tob.BidVolUSD50
+			values["ask_vol_usd_50"] = tob.AskVolUSD50
+		}
+		if tob.BidVolUSD100 != "" {
+			values["bid_vol_usd_100"] = tob.BidVolUSD100
+			values["ask_vol_usd_100"] = tob.AskVolUSD100
 		}
 		if perr := pub.Publish(pctx, StreamCEX, values); perr != nil && ctx.Err() == nil {
 			log.Printf("[%s] publish hatasi: %v", a.Name, perr)

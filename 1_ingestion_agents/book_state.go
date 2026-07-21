@@ -56,6 +56,73 @@ func (b *bookState) Totals() (string, string, string, string, string, string) {
 	return sumLevels(b5), sumLevels(a5), sumLevels(b20), sumLevels(a20), sumLevels(b50), sumLevels(a50)
 }
 
+func (b *bookState) BandTotals() (string, string, string, string, string, string, string, string) {
+	bids, asks := b.Snapshot(0)
+	return bandTotalsFromLevels(bids, asks)
+}
+
+func bandTotalsFromLevels(bids, asks [][]string) (string, string, string, string, string, string, string, string) {
+	bands := []float64{10, 25, 50, 100}
+	bidTotals := make([]float64, len(bands))
+	askTotals := make([]float64, len(bands))
+	if len(bids) == 0 || len(asks) == 0 {
+		return "", "", "", "", "", "", "", ""
+	}
+	bestBid, okBid := parseLevelPrice(bids[0])
+	bestAsk, okAsk := parseLevelPrice(asks[0])
+	if !okBid || !okAsk {
+		return "", "", "", "", "", "", "", ""
+	}
+	for _, lv := range bids {
+		price, size, ok := parseLevel(lv)
+		if !ok {
+			continue
+		}
+		distance := bestBid - price
+		for i, band := range bands {
+			if distance >= 0 && distance <= band {
+				bidTotals[i] += size
+			}
+		}
+	}
+	for _, lv := range asks {
+		price, size, ok := parseLevel(lv)
+		if !ok {
+			continue
+		}
+		distance := price - bestAsk
+		for i, band := range bands {
+			if distance >= 0 && distance <= band {
+				askTotals[i] += size
+			}
+		}
+	}
+	return formatFloat(bidTotals[0]), formatFloat(askTotals[0]),
+		formatFloat(bidTotals[1]), formatFloat(askTotals[1]),
+		formatFloat(bidTotals[2]), formatFloat(askTotals[2]),
+		formatFloat(bidTotals[3]), formatFloat(askTotals[3])
+}
+
+func parseLevelPrice(lv []string) (float64, bool) {
+	if len(lv) < 1 {
+		return 0, false
+	}
+	price, err := strconv.ParseFloat(lv[0], 64)
+	return price, err == nil
+}
+
+func parseLevel(lv []string) (float64, float64, bool) {
+	if len(lv) < 2 {
+		return 0, 0, false
+	}
+	price, errP := strconv.ParseFloat(lv[0], 64)
+	size, errS := strconv.ParseFloat(lv[1], 64)
+	return price, size, errP == nil && errS == nil && size > 0
+}
+
+func formatFloat(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
+}
 func topLevels(side bookSide, limit int, desc bool) [][]string {
 	type level struct {
 		price float64

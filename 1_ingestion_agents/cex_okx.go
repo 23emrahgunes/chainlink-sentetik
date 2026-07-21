@@ -51,12 +51,15 @@ func okxAdapter(url, src, inst, marketType string) CEXAdapter {
 			}
 			b5 := sumLevels(d.Bids)
 			a5 := sumLevels(d.Asks)
+			bu10, au10, bu25, au25, bu50, au50, bu100, au100 := bandTotalsFromLevels(d.Bids, d.Asks)
 			return &TopOfBook{
 				Src: src, MarketType: marketType,
 				BidP: d.Bids[0][0], BidQ: d.Bids[0][1],
 				AskP: d.Asks[0][0], AskQ: d.Asks[0][1],
 				BidVol: b5, AskVol: a5,
 				BidVol5: b5, AskVol5: a5,
+				BidVolUSD10: bu10, AskVolUSD10: au10, BidVolUSD25: bu25, AskVolUSD25: au25,
+				BidVolUSD50: bu50, AskVolUSD50: au50, BidVolUSD100: bu100, AskVolUSD100: au100,
 			}, true
 		},
 	}

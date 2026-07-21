@@ -31,12 +31,15 @@ func BinanceAdapter(url string) CEXAdapter {
 			a5 := sumLevels(d.Asks[:minInt(len(d.Asks), 5)])
 			b20 := sumLevels(d.Bids)
 			a20 := sumLevels(d.Asks)
+			bu10, au10, bu25, au25, bu50, au50, bu100, au100 := bandTotalsFromLevels(d.Bids, d.Asks)
 			return &TopOfBook{
 				Src: "binance", MarketType: "perp",
 				BidP: d.Bids[0][0], BidQ: d.Bids[0][1],
 				AskP: d.Asks[0][0], AskQ: d.Asks[0][1],
 				BidVol: b20, AskVol: a20,
 				BidVol5: b5, AskVol5: a5, BidVol20: b20, AskVol20: a20,
+				BidVolUSD10: bu10, AskVolUSD10: au10, BidVolUSD25: bu25, AskVolUSD25: au25,
+				BidVolUSD50: bu50, AskVolUSD50: au50, BidVolUSD100: bu100, AskVolUSD100: au100,
 			}, true
 		},
 	}
